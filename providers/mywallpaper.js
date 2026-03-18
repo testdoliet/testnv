@@ -16,7 +16,11 @@ function log(...args) {
 
 function titleToSlug(title) {
     if (!title) return '';
-    return title.toLowerCase()
+    
+    // Converte × especial para x normal
+    const normalized = title.replace(/×/g, 'x');
+    
+    return normalized.toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '');
@@ -370,6 +374,43 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!tmdbEnglishTitle && !tmdbOriginalTitle) {
             console.log('❌ Erro: Título TMDB não encontrado');
             return [];
+        }
+        
+        // ========== PASSO 1.5: TESTE DIRETO COM SLUG DO TMDB ==========
+        console.log('\n📥 PASSO 1.5: Testando slug direto do TMDB...');
+        
+        const tmdbSlug = titleToSlug(tmdbEnglishTitle);
+        const firstLetter = tmdbSlug.charAt(0) || 't';
+        
+        // Testa legendado
+        const legTmdbUrl = `${CDN_BASE}/stream/${firstLetter}/${tmdbSlug}/${epPadded}.mp4/index.m3u8`;
+        console.log(`   📍 TMDB Legendado: ${legTmdbUrl.substring(0, 70)}...`);
+        if (await testUrl(legTmdbUrl)) {
+            validStreams.push({
+                url: legTmdbUrl,
+                name: `My Wallpaper Legendado 1080p`,
+                title: `${tmdbEnglishTitle} EP${targetEpisode}`,
+                quality: 1080,
+                type: 'hls'
+            });
+        }
+        
+        // Testa dublado
+        const dubTmdbUrl = `${CDN_BASE}/stream/${firstLetter}/${tmdbSlug}-dublado/${epPadded}.mp4/index.m3u8`;
+        console.log(`   📍 TMDB Dublado: ${dubTmdbUrl.substring(0, 70)}...`);
+        if (await testUrl(dubTmdbUrl)) {
+            validStreams.push({
+                url: dubTmdbUrl,
+                name: `My Wallpaper Dublado 1080p`,
+                title: `${tmdbEnglishTitle} EP${targetEpisode}`,
+                quality: 1080,
+                type: 'hls'
+            });
+        }
+        
+        if (validStreams.length > 0) {
+            console.log(`\n✅ Encontrados ${validStreams.length} streams no PASSO 1.5`);
+            return validStreams;
         }
         
         // ========== PASSO 2: ANILIST (DUAS PESQUISAS) ==========
