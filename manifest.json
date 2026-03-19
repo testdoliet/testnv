@@ -59,6 +59,39 @@
         "legendado",
         "dublado"
       ]
+    },
+    {
+    "id": "superflixapi",
+      "name": "SuperFlixAPI",
+      "description": "Assista filmes e muito mais através da SuperFlixAPI",
+      "version": "1.0.0",
+      "author": "lawlietbr",
+      "supportedTypes": [
+        "tv",
+        "movie"
+      ],
+      "filename": "providers/superflixapi.js",
+      "enabled": true,
+      "logo": "",
+      "contentLanguage": [
+        "pt-br"
+      ],
+      "formats": [
+        "hls",
+        "m3u8"
+      ],
+      "limited": false,
+      "disabledPlatforms": [],
+      "supportsExternalPlayer": true,
+      "tags": [
+        "filmes",
+        "doramas",
+        "séries",
+        "desenhos",
+        "dublado"
+      ]
     }
+  
+  
   ]
 }
