@@ -1,358 +1,249 @@
-// SuperFlixAPI - Conversão direta do script Python
-// Para usar no Nuvio
+// SuperFlixAPI - Versão com headers COMPLETOS
 
-const BASE_URL = "https://warezcdn.site";
-const API_OPTIONS = `${BASE_URL}/player/options`;
-const API_SOURCE = `${BASE_URL}/player/source`;
-const CDN_BASE = "https://llanfairpwllgwyngy.com";
-
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'pt-BR',
-    'Referer': 'https://lospobreflix.site/',
-    'Sec-Fetch-Dest': 'iframe',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'cross-site',
-    'Upgrade-Insecure-Requests': '1',
-};
-
-const API_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'pt-BR',
-    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-    'X-Requested-With': 'XMLHttpRequest',
-    'Origin': BASE_URL,
-    'Referer': `${BASE_URL}/`,
-};
-
-// Cache simples
-const CACHE = {};
-
-// ===== FUNÇÕES AUXILIARES (IGUAIS AO PYTHON) =====
-
-function extractFromHTML(html) {
-    const data = {};
+async function getStreams(tmdbId, mediaType = 'tv', season = 1, episode = 1) {
+    console.log(`[SuperFlix] Iniciando: ${tmdbId} S${season}E${episode}`);
     
-    // ALL_EPISODES
-    const epPattern = /var ALL_EPISODES\s*=\s*(\{.*?\});/s;
-    const epMatch = html.match(epPattern);
-    if (epMatch) {
-        try {
-            data.episodes = JSON.parse(epMatch[1]);
-            console.log("✅ ALL_EPISODES encontrado");
-        } catch {
-            console.log("❌ Erro ao parsear ALL_EPISODES");
-        }
-    }
-    
-    // CSRF_TOKEN
-    const csrfPattern = /var CSRF_TOKEN\s*=\s*["']([^"']+)["']/;
-    const csrfMatch = html.match(csrfPattern);
-    if (csrfMatch) {
-        data.csrf_token = csrfMatch[1];
-        console.log(`✅ CSRF_TOKEN: ${data.csrf_token}`);
-    }
-    
-    // PAGE_TOKEN
-    const pagePattern = /var PAGE_TOKEN\s*=\s*["']([^"']+)["']/;
-    const pageMatch = html.match(pagePattern);
-    if (pageMatch) {
-        data.page_token = pageMatch[1];
-        console.log(`✅ PAGE_TOKEN: ${data.page_token.substring(0, 50)}...`);
-    }
-    
-    return data;
-}
-
-async function getOptions(contentId, csrf_token, page_token) {
-    console.log(`\n🔧 Buscando options para content_id: ${contentId}`);
-    
-    const params = new URLSearchParams();
-    params.append('contentid', contentId);
-    params.append('type', 'serie');
-    params.append('_token', csrf_token);
-    params.append('page_token', page_token);
-    params.append('pageToken', page_token);
-    
+    // Headers COMPLETOS iguais ao Python
     const headers = {
-        ...API_HEADERS,
-        'X-Page-Token': page_token,
-        'Referer': `${BASE_URL}/serie/1429/1/1`,
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'pt-BR',
+        'Referer': 'https://lospobreflix.site/',
+        'Sec-Fetch-Dest': 'iframe',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'cross-site',
+        'Upgrade-Insecure-Requests': '1',
+        'Connection': 'keep-alive',
+        'Cache-Control': 'max-age=0'
     };
     
-    try {
-        const response = await fetch(API_OPTIONS, {
-            method: 'POST',
-            headers: headers,
-            body: params
-        });
-        
-        console.log(`📊 Status code: ${response.status}`);
-        
-        if (response.status !== 200) {
-            console.log(`❌ Erro: ${response.status}`);
-            return null;
-        }
-        
-        const data = await response.json();
-        console.log(`📄 Resposta: ${JSON.stringify(data, null, 2)}`);
-        
-        const options = data.data?.options || [];
-        console.log(`✅ Encontradas ${options.length} opções`);
-        
-        return options;
-        
-    } catch (e) {
-        console.log(`❌ Erro: ${e.message}`);
-        return null;
-    }
-}
-
-async function getSource(videoId, csrf_token, page_token) {
-    console.log(`\n🎬 Buscando source para video_id: ${videoId}`);
-    
-    const params = new URLSearchParams();
-    params.append('video_id', videoId);
-    params.append('page_token', page_token);
-    params.append('_token', csrf_token);
-    
-    const headers = {
-        ...API_HEADERS,
-        'Referer': `${BASE_URL}/serie/1429/1/1`,
-    };
-    
-    try {
-        const response = await fetch(API_SOURCE, {
-            method: 'POST',
-            headers: headers,
-            body: params
-        });
-        
-        console.log(`📊 Status code: ${response.status}`);
-        
-        if (response.status !== 200) {
-            console.log(`❌ Erro: ${response.status}`);
-            return null;
-        }
-        
-        const data = await response.json();
-        console.log(`📄 Resposta: ${JSON.stringify(data, null, 2)}`);
-        
-        const video_url = data.data?.video_url;
-        if (video_url) {
-            console.log(`✅ URL encontrada: ${video_url}`);
-            return video_url;
-        }
-        
-        return null;
-        
-    } catch (e) {
-        console.log(`❌ Erro: ${e.message}`);
-        return null;
-    }
-}
-
-async function followRedirect(redirect_url) {
-    console.log(`\n🔄 Seguindo redirect: ${redirect_url}`);
-    
-    try {
-        const response = await fetch(redirect_url, {
-            method: 'GET',
-            headers: HEADERS,
-            redirect: 'follow'
-        });
-        
-        console.log(`📊 Status code final: ${response.status}`);
-        console.log(`📍 URL final: ${response.url}`);
-        
-        return response.url;
-        
-    } catch (e) {
-        console.log(`❌ Erro no redirect: ${e.message}`);
-        return redirect_url;
-    }
-}
-
-async function getVideoData(player_hash) {
-    console.log(`\n🎯 Obtendo dados do vídeo para hash: ${player_hash}`);
-    
-    const url = `${CDN_BASE}/player/index.php?data=${player_hash}&do=getVideo`;
-    
-    const headers = {
-        'Accept': '*/*',
+    const apiHeaders = {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'pt-BR',
         'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'Origin': CDN_BASE,
-        'Referer': `${CDN_BASE}/`,
         'X-Requested-With': 'XMLHttpRequest',
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36'
+        'Origin': 'https://warezcdn.site',
+        'Referer': 'https://warezcdn.site/',
+        'Connection': 'keep-alive'
     };
     
-    const params = new URLSearchParams();
-    params.append('hash', player_hash);
-    params.append('r', '');
-    
     try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: headers,
-            body: params
-        });
+        // 1. Buscar página inicial
+        const pageUrl = `https://warezcdn.site/serie/${tmdbId}/${season}/${episode}`;
+        console.log(`[SuperFlix] Acessando: ${pageUrl}`);
         
-        console.log(`📊 Status code: ${response.status}`);
+        const pageRes = await fetch(pageUrl, { headers });
         
-        if (response.status !== 200) {
-            console.log(`❌ Erro: ${response.status}`);
-            return null;
-        }
-        
-        const data = await response.json();
-        console.log(`✅ Dados do vídeo obtidos!`);
-        console.log(`📄 Resposta: ${JSON.stringify(data, null, 2)}`);
-        
-        return data;
-        
-    } catch (e) {
-        console.log(`❌ Erro: ${e.message}`);
-        return null;
-    }
-}
-
-// ===== FUNÇÃO PRINCIPAL (MESMA ESTRUTURA DO PYTHON) =====
-
-async function getStreams(tmdb_id, media_type = 'tv', season = 1, episode = 1) {
-    console.log(`\n${'='.repeat(70)}`);
-    console.log(`🔍 Extraindo: TMDB ID ${tmdb_id} S${season}E${episode}`);
-    console.log(`${'='.repeat(70)}`);
-    
-    // Para filmes, ignorar season/episode
-    const targetSeason = media_type === 'movie' ? 1 : season;
-    const targetEpisode = media_type === 'movie' ? 1 : episode;
-    
-    try {
-        // 1. Acessar página do player
-        const player_url = `${BASE_URL}/serie/${tmdb_id}/${targetSeason}/${targetEpisode}`;
-        console.log(`\n🌐 Acessando: ${player_url}`);
-        
-        const response = await fetch(player_url, {
-            method: 'GET',
-            headers: HEADERS
-        });
-        
-        console.log(`📊 Status code: ${response.status}`);
-        
-        if (response.status !== 200) {
-            console.log(`❌ Erro: ${response.status}`);
+        if (!pageRes.ok) {
+            console.log(`[SuperFlix] Erro HTTP: ${pageRes.status}`);
             return [];
         }
         
-        const html = await response.text();
-        console.log(`✅ Página carregada: ${html.length} caracteres`);
+        const html = await pageRes.text();
+        console.log(`[SuperFlix] HTML recebido: ${html.length} chars`);
         
-        // 2. Extrair tokens e episódios
-        const extracted = extractFromHTML(html);
+        // Mostrar primeiros 500 chars para debug
+        console.log(`[SuperFlix] HTML preview: ${html.substring(0, 500)}`);
         
-        if (!extracted.csrf_token || !extracted.page_token) {
-            console.log("❌ Tokens não encontrados");
+        // 2. Extrair tokens
+        const csrfMatch = html.match(/var CSRF_TOKEN\s*=\s*["']([^"']+)["']/);
+        const pageMatch = html.match(/var PAGE_TOKEN\s*=\s*["']([^"']+)["']/);
+        const episodesMatch = html.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
+        
+        console.log(`[SuperFlix] CSRF encontrado: ${!!csrfMatch}`);
+        console.log(`[SuperFlix] PAGE_TOKEN encontrado: ${!!pageMatch}`);
+        console.log(`[SuperFlix] ALL_EPISODES encontrado: ${!!episodesMatch}`);
+        
+        if (!csrfMatch || !pageMatch) {
+            console.log('[SuperFlix] Tokens não encontrados');
             return [];
         }
         
-        if (!extracted.episodes) {
-            console.log("❌ ALL_EPISODES não encontrado");
+        const csrfToken = csrfMatch[1];
+        const pageToken = pageMatch[1];
+        console.log(`[SuperFlix] CSRF: ${csrfToken.substring(0, 20)}...`);
+        console.log(`[SuperFlix] PageToken: ${pageToken.substring(0, 20)}...`);
+        
+        // 3. Extrair content_id
+        if (!episodesMatch) {
+            console.log('[SuperFlix] ALL_EPISODES não encontrado');
             return [];
         }
         
-        // 3. Encontrar content_id
-        const seasonStr = targetSeason.toString();
-        if (!extracted.episodes[seasonStr]) {
-            console.log(`❌ Temporada ${targetSeason} não encontrada`);
-            return [];
-        }
-        
-        let content_id = null;
-        for (const ep of extracted.episodes[seasonStr]) {
-            if (ep.epi_num === targetEpisode) {
-                content_id = ep.ID?.toString();
-                console.log(`✅ Content ID encontrado: ${content_id}`);
-                break;
-            }
-        }
-        
-        if (!content_id) {
-            console.log(`❌ Episódio ${targetEpisode} não encontrado`);
-            return [];
-        }
-        
-        // 4. Obter options
-        const options = await getOptions(content_id, extracted.csrf_token, extracted.page_token);
-        
-        if (!options || options.length === 0) {
-            console.log("❌ Nenhuma opção encontrada");
-            return [];
-        }
-        
-        // 5. Usar a primeira opção
-        if (options && options.length > 0) {
-            const video_id = options[0].ID;
-            const redirect_url = await getSource(video_id, extracted.csrf_token, extracted.page_token);
-            
-            if (redirect_url) {
-                // 6. Seguir redirect até o player
-                const player_page_url = await followRedirect(redirect_url);
-                
-                // 7. Extrair hash da URL do player
-                const player_hash = player_page_url.split('/').pop();
-                console.log(`✅ Hash do player extraído da URL: ${player_hash}`);
-                
-                // 8. Obter dados do vídeo via POST
-                const video_data = await getVideoData(player_hash);
-                
-                if (video_data) {
-                    // 9. Extrair informações
-                    const secured_link = video_data.securedLink;
-                    const video_source = video_data.videoSource;
-                    
-                    // 10. URL final
-                    const video_url = secured_link || video_source;
-                    
-                    if (video_url) {
-                        // Buscar título do TMDB (opcional)
-                        let displayTitle = `TMDB ${tmdb_id}`;
-                        if (media_type !== 'movie') {
-                            displayTitle = `S${targetSeason}E${targetEpisode}`;
-                        }
-                        
-                        console.log(`\n${'='.repeat(70)}`);
-                        console.log("RESULTADO:");
-                        console.log(`${'='.repeat(70)}`);
-                        console.log(`✅ SUCESSO!`);
-                        console.log(`📹 URL do vídeo: ${video_url}`);
-                        
-                        return [{
-                            url: video_url,
-                            headers: {
-                                'Referer': `${CDN_BASE}/`,
-                                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
-                            },
-                            name: 'SuperFlix 1080p',
-                            title: displayTitle
-                        }];
+        let contentId = null;
+        try {
+            const episodes = JSON.parse(episodesMatch[1]);
+            const seasonData = episodes[season.toString()];
+            if (seasonData) {
+                for (const ep of seasonData) {
+                    if (ep.epi_num === episode) {
+                        contentId = ep.ID?.toString();
+                        break;
                     }
                 }
             }
+        } catch (e) {
+            console.log('[SuperFlix] Erro ao parsear episódios:', e.message);
+            return [];
         }
         
-        return [];
+        if (!contentId) {
+            console.log('[SuperFlix] Content ID não encontrado');
+            return [];
+        }
         
-    } catch (e) {
-        console.log(`❌ Erro: ${e.message}`);
+        console.log(`[SuperFlix] Content ID: ${contentId}`);
+        
+        // 4. Obter options
+        const optionsParams = new URLSearchParams();
+        optionsParams.append('contentid', contentId);
+        optionsParams.append('type', 'serie');
+        optionsParams.append('_token', csrfToken);
+        optionsParams.append('page_token', pageToken);
+        optionsParams.append('pageToken', pageToken);
+        
+        const optionsHeaders = {
+            ...apiHeaders,
+            'X-Page-Token': pageToken,
+            'Referer': `https://warezcdn.site/serie/${tmdbId}/${season}/${episode}`
+        };
+        
+        console.log(`[SuperFlix] Enviando options para content_id: ${contentId}`);
+        
+        const optionsRes = await fetch('https://warezcdn.site/player/options', {
+            method: 'POST',
+            headers: optionsHeaders,
+            body: optionsParams
+        });
+        
+        if (!optionsRes.ok) {
+            console.log(`[SuperFlix] Options falhou: ${optionsRes.status}`);
+            const text = await optionsRes.text();
+            console.log(`[SuperFlix] Resposta: ${text.substring(0, 200)}`);
+            return [];
+        }
+        
+        const optionsData = await optionsRes.json();
+        console.log(`[SuperFlix] Options resposta:`, JSON.stringify(optionsData).substring(0, 200));
+        
+        const videoId = optionsData?.data?.options?.[0]?.ID;
+        
+        if (!videoId) {
+            console.log('[SuperFlix] Nenhum video_id encontrado');
+            return [];
+        }
+        
+        console.log(`[SuperFlix] Video ID: ${videoId}`);
+        
+        // 5. Obter source
+        const sourceParams = new URLSearchParams();
+        sourceParams.append('video_id', videoId);
+        sourceParams.append('page_token', pageToken);
+        sourceParams.append('_token', csrfToken);
+        
+        const sourceHeaders = {
+            ...apiHeaders,
+            'Referer': `https://warezcdn.site/serie/${tmdbId}/${season}/${episode}`
+        };
+        
+        console.log(`[SuperFlix] Buscando source para video_id: ${videoId}`);
+        
+        const sourceRes = await fetch('https://warezcdn.site/player/source', {
+            method: 'POST',
+            headers: sourceHeaders,
+            body: sourceParams
+        });
+        
+        if (!sourceRes.ok) {
+            console.log(`[SuperFlix] Source falhou: ${sourceRes.status}`);
+            const text = await sourceRes.text();
+            console.log(`[SuperFlix] Resposta: ${text.substring(0, 200)}`);
+            return [];
+        }
+        
+        const sourceData = await sourceRes.json();
+        console.log(`[SuperFlix] Source resposta:`, JSON.stringify(sourceData).substring(0, 200));
+        
+        const redirectUrl = sourceData?.data?.video_url;
+        
+        if (!redirectUrl) {
+            console.log('[SuperFlix] Nenhuma URL de redirect');
+            return [];
+        }
+        
+        console.log(`[SuperFlix] Redirect: ${redirectUrl.substring(0, 100)}...`);
+        
+        // 6. Seguir redirect
+        const redirectRes = await fetch(redirectUrl, {
+            method: 'GET',
+            headers: headers,
+            redirect: 'follow'
+        });
+        
+        const playerUrl = redirectRes.url;
+        const playerHash = playerUrl.split('/').pop();
+        console.log(`[SuperFlix] Player URL: ${playerUrl}`);
+        console.log(`[SuperFlix] Player Hash: ${playerHash}`);
+        
+        // 7. Obter dados do vídeo
+        const videoParams = new URLSearchParams();
+        videoParams.append('hash', playerHash);
+        videoParams.append('r', '');
+        
+        const videoHeaders = {
+            'Accept': '*/*',
+            'Accept-Language': 'pt-BR',
+            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+            'Origin': 'https://llanfairpwllgwyngy.com',
+            'Referer': 'https://llanfairpwllgwyngy.com/',
+            'X-Requested-With': 'XMLHttpRequest',
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
+        };
+        
+        console.log(`[SuperFlix] Obtendo dados do vídeo para hash: ${playerHash}`);
+        
+        const videoRes = await fetch(`https://llanfairpwllgwyngy.com/player/index.php?data=${playerHash}&do=getVideo`, {
+            method: 'POST',
+            headers: videoHeaders,
+            body: videoParams
+        });
+        
+        if (!videoRes.ok) {
+            console.log(`[SuperFlix] Video data falhou: ${videoRes.status}`);
+            return [];
+        }
+        
+        const videoData = await videoRes.json();
+        console.log(`[SuperFlix] Video data recebida`);
+        
+        const finalUrl = videoData.securedLink || videoData.videoSource;
+        
+        if (!finalUrl) {
+            console.log('[SuperFlix] Nenhuma URL final encontrada');
+            return [];
+        }
+        
+        console.log(`[SuperFlix] FINAL URL: ${finalUrl}`);
+        
+        // 8. Retornar stream
+        return [{
+            url: finalUrl,
+            headers: {
+                'Referer': 'https://llanfairpwllgwyngy.com/',
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
+            },
+            name: 'SuperFlix 1080p',
+            title: `S${season}E${episode}`
+        }];
+        
+    } catch (error) {
+        console.log(`[SuperFlix] ERRO: ${error.message}`);
         return [];
     }
 }
 
-// Exportação para Nuvio
+// Exportar
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { getStreams };
 } else {
