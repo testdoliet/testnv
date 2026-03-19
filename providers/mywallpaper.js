@@ -16,7 +16,11 @@ function log(...args) {
 
 function titleToSlug(title) {
     if (!title) return '';
-    return title.toLowerCase()
+    
+    // Converte × especial para x normal
+    const normalized = title.replace(/×/g, 'x');
+    
+    return normalized.toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '');
@@ -93,6 +97,56 @@ async function getTMDBOriginalTitle(tmdbId) {
         return data.original_name || data.name || null;
     } catch (error) {
         log('   ❌ TMDB erro:', error.message);
+        return null;
+    }
+}
+
+async function getTMDBSeasonsInfo(tmdbId) {
+    const url = `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`;
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) return null;
+        const data = await response.json();
+        
+        const seasons = data.seasons || [];
+        const seasonsInfo = [];
+        let totalEpisodesBefore = 0;
+        
+        seasons.sort((a, b) => a.season_number - b.season_number);
+        
+        for (const season of seasons) {
+            if (season.season_number > 0) {
+                seasonsInfo.push({
+                    seasonNumber: season.season_number,
+                    episodeCount: season.episode_count || 0,
+                    totalBefore: totalEpisodesBefore
+                });
+                totalEpisodesBefore += season.episode_count || 0;
+            }
+        }
+        
+        return seasonsInfo;
+    } catch (error) {
+        return null;
+    }
+}
+
+function calculateAbsoluteEpisode(seasonsInfo, targetSeason, targetEpisode) {
+    if (!seasonsInfo) return null;
+    const seasonInfo = seasonsInfo.find(s => s.seasonNumber === targetSeason);
+    if (!seasonInfo) return null;
+    return seasonInfo.totalBefore + targetEpisode;
+}
+
+async function getTMDBTitle(tmdbId) {
+    const url = TMDB_BASE_URL + '/tv/' + tmdbId + '?api_key=' + TMDB_API_KEY + '&language=en-US';
+    try {
+        const response = await fetch(url);
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.name;
+    } catch {
         return null;
     }
 }
@@ -201,75 +255,61 @@ async function getAnimeDetails(animeId) {
     }
 }
 
-// ==================== FUNÇÕES DE ANÁLISE DE PARTES ====================
+async function searchAnilistId(title) {
+    const query = `
+        query ($search: String) {
+            Media(search: $search, type: ANIME) {
+                id
+            }
+        }
+    `;
 
-async function getAllPartsFromSequel(initialAnime) {
-    log('📥 Analisando partes via SEQUEL...');
-    
-    const allParts = [];
+    const response = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: { search: title } })
+    });
+
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.data && data.data.Media ? data.data.Media.id : null;
+}
+
+async function getAllSeasons(startId) {
+    const allSeasons = [];
     const visited = new Set();
-    
-    async function followChain(anime, partNum) {
-        if (!anime || visited.has(anime.id)) return;
-        visited.add(anime.id);
-        
-        const title = anime.title.romaji || anime.title.english;
-        const episodes = anime.episodes || 0;
-        
-        log(`   Parte ${partNum}: "${title}" (${episodes} eps)`);
-        
-        allParts.push({
-            id: anime.id,
-            title: title,
-            episodes: episodes,
-            partNumber: partNum
+
+    async function followChain(animeId, seasonNum) {
+        if (visited.has(animeId)) return;
+        visited.add(animeId);
+
+        await new Promise(r => setTimeout(r, 1000));
+
+        const anime = await getAnimeDetails(animeId);
+        if (!anime) return;
+
+        allSeasons.push({
+            id: animeId,
+            title: anime.title.romaji || anime.title.english,
+            season: seasonNum,
+            episodes: anime.episodes || 0
         });
-        
+
         const edges = anime.relations?.edges || [];
         for (const edge of edges) {
             if (edge.relationType === 'SEQUEL') {
-                log(`   → Encontrou SEQUEL para parte ${partNum + 1}`);
-                const nextAnime = await getAnimeDetails(edge.node.id);
-                if (nextAnime) {
-                    await followChain(nextAnime, partNum + 1);
-                    break;
-                }
+                await followChain(edge.node.id, seasonNum + 1);
+                break;
             }
         }
     }
-    
-    await followChain(initialAnime, 1);
-    
-    log(`   ✅ Total de partes encontradas: ${allParts.length}`);
-    return allParts;
-}
 
-function findTargetPart(parts, targetEpisode) {
-    if (!parts || parts.length === 0) {
-        log('   ❌ Nenhuma parte para analisar');
-        return null;
-    }
+    await followChain(startId, 1);
     
-    parts.sort((a, b) => a.partNumber - b.partNumber);
-    log(`   🔍 Procurando episódio ${targetEpisode} nas partes...`);
+    // Ordena por temporada
+    allSeasons.sort((a, b) => a.season - b.season);
     
-    let episodesBefore = 0;
-    for (const part of parts) {
-        if (targetEpisode <= episodesBefore + part.episodes) {
-            const episodeInPart = targetEpisode - episodesBefore;
-            log(`   ✅ Episódio ${targetEpisode} → Parte ${part.partNumber}, ep ${episodeInPart}`);
-            return {
-                ...part,
-                episodeInPart: episodeInPart,
-                episodesBefore: episodesBefore,
-                totalParts: parts.length
-            };
-        }
-        episodesBefore += part.episodes;
-    }
-    
-    log('   ❌ Episódio não encontrado em nenhuma parte');
-    return null;
+    return allSeasons;
 }
 
 // ==================== FUNÇÕES DE GERAÇÃO DE SLUGS ====================
@@ -317,30 +357,27 @@ function generateSeasonSlugs(baseSlug, seasonNumber) {
     return variations;
 }
 
-function generatePartSlugs(baseSlug, partInfo) {
-    if (!partInfo) return [];
+// Função para remover "Part" do título
+function removePartFromTitle(title) {
+    if (!title) return '';
     
-    log(`📥 Gerando slugs para parte ${partInfo.partNumber}...`);
+    // Remove "Part X", "Parte X", etc do título
+    return title
+        .replace(/[:\s]*(Part|Parte)\s*\d+.*$/i, '') // Remove "Part 2" do final
+        .replace(/\s*-\s*.*$/, '') // Remove " - Kanketsu-hen" etc
+        .trim();
+}
+
+// Função para extrair o número da parte do título
+function extractPartNumberFromTitle(title) {
+    if (!title) return null;
     
-    const variations = [];
-    const seen = new Set();
-    
-    function add(slug) {
-        if (!seen.has(slug)) {
-            seen.add(slug);
-            variations.push(slug);
-        }
+    // Procura por "Part X", "Parte X" no título
+    const match = title.match(/[:\s]*(Part|Parte)\s*(\d+)/i);
+    if (match) {
+        return parseInt(match[2], 10);
     }
-    
-    const partSlug = titleToSlug(partInfo.title);
-    add(partSlug);
-    
-    if (partInfo.totalParts > 1) {
-        add(`${baseSlug}-part-${partInfo.partNumber}`);
-    }
-    
-    log(`   → Gerados ${variations.length} slugs de parte`);
-    return variations;
+    return null;
 }
 
 // ==================== FUNÇÃO PRINCIPAL ====================
@@ -370,6 +407,50 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!tmdbEnglishTitle && !tmdbOriginalTitle) {
             console.log('❌ Erro: Título TMDB não encontrado');
             return [];
+        }
+        
+        // ========== PASSO 1.5: TESTE DIRETO COM SLUG DO TMDB ==========
+        console.log('\n📥 PASSO 1.5: Testando slug direto do TMDB...');
+        
+        const tmdbBaseSlug = titleToSlug(tmdbEnglishTitle);
+        let tmdbSlug = tmdbBaseSlug;
+        
+        // Se não for temporada 1, adiciona o número da temporada
+        if (targetSeason > 1) {
+            tmdbSlug = `${tmdbBaseSlug}-${targetSeason}`;
+        }
+        
+        const firstLetter = tmdbSlug.charAt(0) || 't';
+        
+        // Testa legendado
+        const legTmdbUrl = `${CDN_BASE}/stream/${firstLetter}/${tmdbSlug}/${epPadded}.mp4/index.m3u8`;
+        console.log(`   📍 TMDB Legendado: ${legTmdbUrl.substring(0, 70)}...`);
+        if (await testUrl(legTmdbUrl)) {
+            validStreams.push({
+                url: legTmdbUrl,
+                name: `My Wallpaper Legendado 1080p`,
+                title: `${tmdbEnglishTitle} S${targetSeason} EP${targetEpisode}`,
+                quality: 1080,
+                type: 'hls'
+            });
+        }
+        
+        // Testa dublado
+        const dubTmdbUrl = `${CDN_BASE}/stream/${firstLetter}/${tmdbSlug}-dublado/${epPadded}.mp4/index.m3u8`;
+        console.log(`   📍 TMDB Dublado: ${dubTmdbUrl.substring(0, 70)}...`);
+        if (await testUrl(dubTmdbUrl)) {
+            validStreams.push({
+                url: dubTmdbUrl,
+                name: `My Wallpaper Dublado 1080p`,
+                title: `${tmdbEnglishTitle} S${targetSeason} EP${targetEpisode}`,
+                quality: 1080,
+                type: 'hls'
+            });
+        }
+        
+        if (validStreams.length > 0) {
+            console.log(`\n✅ Encontrados ${validStreams.length} streams no PASSO 1.5`);
+            return validStreams;
         }
         
         // ========== PASSO 2: ANILIST (DUAS PESQUISAS) ==========
@@ -498,43 +579,180 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return validStreams;
         }
         
-        // ========== PASSO 5: ANÁLISE DE PARTES ==========
-        console.log('\n📥 PASSO 5: Tentando análise de partes...');
-        const allParts = await getAllPartsFromSequel(seasonAnimeData);
+        // ========== PASSO 5: ANÁLISE DE PARTES COM SEQUEL ==========
+        console.log('\n📥 PASSO 5: Tentando análise de partes via SEQUEL...');
+        
+        // Segue as relações SEQUEL para encontrar todas as partes
+        let allParts = [];
+        let currentAnime = seasonAnimeData;
+        let visited = new Set();
+        let partNum = 1;
+        
+        while (currentAnime && !visited.has(currentAnime.id)) {
+            visited.add(currentAnime.id);
+            
+            allParts.push({
+                id: currentAnime.id,
+                title: currentAnime.title?.romaji || currentAnime.title?.english,
+                episodes: currentAnime.episodes || 0,
+                partNumber: partNum
+            });
+            
+            // Procura por SEQUEL
+            const sequel = currentAnime.relations?.edges?.find(e => e.relationType === 'SEQUEL');
+            if (!sequel) break;
+            
+            currentAnime = await getAnimeDetails(sequel.node.id);
+            partNum++;
+        }
         
         if (allParts.length > 0) {
-            const targetPart = findTargetPart(allParts, targetEpisode);
+            log(`   ✅ Total de partes encontradas: ${allParts.length}`);
+            
+            // Encontra em qual parte cai o episódio
+            let episodesBefore = 0;
+            let targetPart = null;
+            
+            for (const part of allParts) {
+                if (targetEpisode <= episodesBefore + part.episodes) {
+                    targetPart = {
+                        ...part,
+                        episodeInPart: targetEpisode - episodesBefore
+                    };
+                    break;
+                }
+                episodesBefore += part.episodes;
+            }
             
             if (targetPart) {
-                const partSlugs = generatePartSlugs(baseRomajiSlug, targetPart);
-                const partEpPadded = targetPart.episodeInPart.toString().padStart(2, '0');
+                console.log(`   ✅ Episódio ${targetEpisode} → Parte ${targetPart.partNumber}, ep ${targetPart.episodeInPart}`);
                 
-                for (const slug of partSlugs) {
-                    const firstLetter = slug.charAt(0) || 't';
+                // Extrai o número da parte do título (se existir)
+                const partNumberFromTitle = extractPartNumberFromTitle(targetPart.title);
+                const finalPartNumber = partNumberFromTitle || targetPart.partNumber;
+                
+                // Remove "Part" do título
+                const titleWithoutPart = removePartFromTitle(targetPart.title);
+                let finalSlug = titleToSlug(titleWithoutPart);
+                
+                // Adiciona o número da parte (usando o número do título, não da sequência)
+                if (finalPartNumber > 1 || partNumberFromTitle) {
+                    finalSlug = `${finalSlug}-${finalPartNumber}`;
+                }
+                
+                const partEpPadded = targetPart.episodeInPart.toString().padStart(2, '0');
+                const firstLetter = finalSlug.charAt(0) || 't';
+                
+                console.log(`   📍 Testando slug: ${finalSlug}`);
+                
+                const legUrl = `${CDN_BASE}/stream/${firstLetter}/${finalSlug}/${partEpPadded}.mp4/index.m3u8`;
+                if (await testUrl(legUrl)) {
+                    validStreams.push({
+                        url: legUrl,
+                        name: `My Wallpaper Legendado 1080p`,
+                        title: `${targetPart.title} EP${targetPart.episodeInPart}`,
+                        quality: 1080,
+                        type: 'hls'
+                    });
+                }
+                
+                const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${finalSlug}-dublado/${partEpPadded}.mp4/index.m3u8`;
+                if (await testUrl(dubUrl)) {
+                    validStreams.push({
+                        url: dubUrl,
+                        name: `My Wallpaper Dublado 1080p`,
+                        title: `${targetPart.title} EP${targetPart.episodeInPart}`,
+                        quality: 1080,
+                        type: 'hls'
+                    });
+                }
+            }
+        }
+        
+        if (validStreams.length > 0) {
+            console.log(`\n✅ Encontrados ${validStreams.length} streams no PASSO 5`);
+            return validStreams;
+        }
+        
+        // ========== PASSO 6: ÚLTIMO RECURSO - EPISÓDIOS ABSOLUTOS ==========
+        console.log('\n📥 PASSO 6: Tentando com episódios absolutos...');
+        
+        const seasonsInfo = await getTMDBSeasonsInfo(tmdbId);
+        
+        if (seasonsInfo?.length) {
+            const absoluteEpisode = calculateAbsoluteEpisode(seasonsInfo, targetSeason, targetEpisode);
+            
+            if (absoluteEpisode) {
+                console.log(`   📊 Episódio absoluto TMDB: ${absoluteEpisode}`);
+                
+                // Pega todas as temporadas/partes do Anilist (começando do base)
+                const anilistId = baseAnimeData?.id;
+                
+                if (anilistId) {
+                    const anilistParts = await getAllSeasons(anilistId);
                     
-                    const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/${partEpPadded}.mp4/index.m3u8`;
-                    console.log(`   📍 Testando parte: ${slug}`);
-                    if (await testUrl(legUrl)) {
-                        validStreams.push({
-                            url: legUrl,
-                            name: `My Wallpaper Legendado 1080p`,
-                            title: `${targetPart.title} EP${targetPart.episodeInPart}`,
-                            quality: 1080,
-                            type: 'hls'
-                        });
-                        break;
-                    }
-                    
-                    const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${partEpPadded}.mp4/index.m3u8`;
-                    if (await testUrl(dubUrl)) {
-                        validStreams.push({
-                            url: dubUrl,
-                            name: `My Wallpaper Dublado 1080p`,
-                            title: `${targetPart.title} EP${targetPart.episodeInPart}`,
-                            quality: 1080,
-                            type: 'hls'
-                        });
-                        break;
+                    if (anilistParts.length) {
+                        log(`   ✅ Total de partes no Anilist: ${anilistParts.length}`);
+                        
+                        // Encontra em qual parte cai o episódio absoluto
+                        let episodesBefore = 0;
+                        let targetAbsolutePart = null;
+                        
+                        for (const part of anilistParts) {
+                            if (absoluteEpisode <= episodesBefore + (part.episodes || 0)) {
+                                targetAbsolutePart = {
+                                    ...part,
+                                    episodeInPart: absoluteEpisode - episodesBefore,
+                                    partNumber: part.season
+                                };
+                                break;
+                            }
+                            episodesBefore += part.episodes || 0;
+                        }
+                        
+                        if (targetAbsolutePart) {
+                            console.log(`   ✅ Episódio absoluto ${absoluteEpisode} → Parte ${targetAbsolutePart.partNumber}, ep ${targetAbsolutePart.episodeInPart}`);
+                            
+                            // Extrai o número da parte do título (se existir)
+                            const partNumberFromTitle = extractPartNumberFromTitle(targetAbsolutePart.title);
+                            const finalPartNumber = partNumberFromTitle || targetAbsolutePart.partNumber;
+                            
+                            // Remove "Part" do título
+                            const titleWithoutPart = removePartFromTitle(targetAbsolutePart.title);
+                            let finalSlug = titleToSlug(titleWithoutPart);
+                            
+                            // Adiciona o número da parte (usando o número do título, não da sequência)
+                            if (finalPartNumber > 1 || partNumberFromTitle) {
+                                finalSlug = `${finalSlug}-${finalPartNumber}`;
+                            }
+                            
+                            const partEpPadded = targetAbsolutePart.episodeInPart.toString().padStart(2, '0');
+                            const firstLetter = finalSlug.charAt(0) || 't';
+                            
+                            console.log(`   📍 Testando slug: ${finalSlug}`);
+                            
+                            const legUrl = `${CDN_BASE}/stream/${firstLetter}/${finalSlug}/${partEpPadded}.mp4/index.m3u8`;
+                            if (await testUrl(legUrl)) {
+                                validStreams.push({
+                                    url: legUrl,
+                                    name: `My Wallpaper Legendado 1080p`,
+                                    title: `${targetAbsolutePart.title} EP${targetAbsolutePart.episodeInPart}`,
+                                    quality: 1080,
+                                    type: 'hls'
+                                });
+                            }
+                            
+                            const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${finalSlug}-dublado/${partEpPadded}.mp4/index.m3u8`;
+                            if (await testUrl(dubUrl)) {
+                                validStreams.push({
+                                    url: dubUrl,
+                                    name: `My Wallpaper Dublado 1080p`,
+                                    title: `${targetAbsolutePart.title} EP${targetAbsolutePart.episodeInPart}`,
+                                    quality: 1080,
+                                    type: 'hls'
+                                });
+                            }
+                        }
                     }
                 }
             }
