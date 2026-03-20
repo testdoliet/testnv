@@ -1,4 +1,4 @@
-// providers/superflix.js
+// providers/superflix.js - Versão com redirect manual
 const BASE_URL = "https://warezcdn.site";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
 
@@ -30,6 +30,16 @@ const API_HEADERS = {
     'Connection': 'keep-alive'
 };
 
+const VIDEO_HEADERS = {
+    'Accept': '*/*',
+    'Accept-Language': 'pt-BR',
+    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    'Origin': CDN_BASE,
+    'Referer': `${CDN_BASE}/`,
+    'X-Requested-With': 'XMLHttpRequest',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
+};
+
 function updateCookies(response) {
     const setCookie = response.headers.get('set-cookie');
     if (setCookie) {
@@ -41,12 +51,37 @@ function getCookieHeader() {
     return SESSION_DATA.cookies ? { 'Cookie': SESSION_DATA.cookies } : {};
 }
 
+// Função para seguir redirects manualmente
+async function followRedirect(url, headers, maxRedirects = 5) {
+    let currentUrl = url;
+    
+    for (let i = 0; i < maxRedirects; i++) {
+        const response = await fetch(currentUrl, {
+            method: 'GET',
+            headers: headers,
+            redirect: 'manual'  // Não segue automaticamente
+        });
+        
+        const location = response.headers.get('location');
+        
+        if (!location) {
+            // Não tem mais redirect, retorna a resposta final
+            return response;
+        }
+        
+        // Segue o redirect manualmente
+        currentUrl = new URL(location, currentUrl).href;
+    }
+    
+    throw new Error('Too many redirects');
+}
+
 async function getStreams(tmdbId, mediaType, season, episode) {
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     
     try {
-        // ETAPA 1: Página inicial
+        // 1. Página inicial
         const pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
         const pageResponse = await fetch(pageUrl, {
             headers: { ...HEADERS, ...getCookieHeader() }
@@ -57,7 +92,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         
         let html = await pageResponse.text();
         
-        // Extrair tokens
+        // 2. Extrair tokens
         const csrfMatch = html.match(/var CSRF_TOKEN\s*=\s*["']([^"']+)["']/);
         if (!csrfMatch) return [];
         SESSION_DATA.csrfToken = csrfMatch[1];
@@ -66,7 +101,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!pageMatch) return [];
         SESSION_DATA.pageToken = pageMatch[1];
         
-        // Extrair ALL_EPISODES
+        // 3. Extrair ALL_EPISODES e contentId
         const epMatch = html.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
         if (!epMatch) return [];
         
@@ -88,7 +123,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         
         if (!contentId) return [];
         
-        // Options
+        // 4. Options
         const optionsParams = new URLSearchParams();
         optionsParams.append('contentid', contentId);
         optionsParams.append('type', 'serie');
@@ -113,7 +148,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         const videoId = optionsData?.data?.options?.[0]?.ID;
         if (!videoId) return [];
         
-        // Source
+        // 5. Source
         const sourceParams = new URLSearchParams();
         sourceParams.append('video_id', videoId);
         sourceParams.append('page_token', SESSION_DATA.pageToken);
@@ -135,54 +170,64 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         const redirectUrl = sourceData?.data?.video_url;
         if (!redirectUrl) return [];
         
-        // Seguir redirects e ver o que retorna
-        let currentUrl = redirectUrl;
-        let maxRedirects = 5;
+        // 6. Seguir redirect MANUALMENTE
+        const redirectHeaders = {
+            ...HEADERS,
+            'Referer': pageUrl,
+            ...getCookieHeader()
+        };
         
-        for (let i = 0; i < maxRedirects; i++) {
-            const redirectResponse = await fetch(currentUrl, {
-                method: 'GET',
-                headers: { ...HEADERS, ...getCookieHeader() },
-                redirect: 'manual'
-            });
-            
-            const location = redirectResponse.headers.get('location');
-            
-            if (!location) {
-                // Não é redirect, pegar o conteúdo para debug
-                const contentType = redirectResponse.headers.get('content-type');
-                const text = await redirectResponse.text();
-                
-                // RETORNO DEBUG: Mostrar o que recebeu
-                return [{
-                    url: `DEBUG_${contentType || 'unknown'}_LEN_${text.length}`,
-                    name: 'SuperFlix_Debug',
-                    title: `Resposta: ${text.substring(0, 300)}`,
-                    quality: 0,
-                    type: 'debug'
-                }];
-            }
-            
-            currentUrl = new URL(location, currentUrl).href;
+        const finalResponse = await followRedirect(redirectUrl, redirectHeaders);
+        
+        if (!finalResponse.ok) return [];
+        
+        const playerUrl = finalResponse.url;
+        const playerHash = playerUrl.split('/').pop();
+        
+        // 7. Obter vídeo final
+        const videoParams = new URLSearchParams();
+        videoParams.append('hash', playerHash);
+        videoParams.append('r', '');
+        
+        const videoResponse = await fetch(`${CDN_BASE}/player/index.php?data=${playerHash}&do=getVideo`, {
+            method: 'POST',
+            headers: VIDEO_HEADERS,
+            body: videoParams.toString()
+        });
+        
+        if (!videoResponse.ok) return [];
+        
+        const videoData = await videoResponse.json();
+        const finalUrl = videoData.securedLink || videoData.videoSource;
+        if (!finalUrl) return [];
+        
+        // 8. Retorna o stream final
+        let quality = '1080p';
+        if (finalUrl.includes('2160') || finalUrl.includes('4k')) quality = '2160p';
+        else if (finalUrl.includes('1440')) quality = '1440p';
+        else if (finalUrl.includes('1080')) quality = '1080p';
+        else if (finalUrl.includes('720')) quality = '720p';
+        else if (finalUrl.includes('480')) quality = '480p';
+        
+        let title = `TMDB ${tmdbId}`;
+        if (mediaType === 'tv') {
+            title = `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
         }
         
-        // Se chegou aqui, muitos redirects
         return [{
-            url: `DEBUG_MAX_REDIRECTS_${currentUrl.substring(0, 150)}`,
-            name: 'SuperFlix_Debug',
-            title: 'Max redirects reached',
-            quality: 0,
-            type: 'debug'
+            url: finalUrl,
+            name: 'SuperFlix',
+            title: title,
+            quality: quality,
+            type: 'hls',
+            headers: {
+                'Referer': `${CDN_BASE}/`,
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
+            }
         }];
         
     } catch (error) {
-        return [{
-            url: `DEBUG_ERROR_${error.message.substring(0, 100)}`,
-            name: 'SuperFlix_Debug',
-            title: 'Error occurred',
-            quality: 0,
-            type: 'debug'
-        }];
+        return [];
     }
 }
 
