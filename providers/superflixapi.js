@@ -1,4 +1,4 @@
-// providers/superflix.js - Versão com debug da API source
+// providers/superflix.js - Versão com debug da redirect URL
 const BASE_URL = "https://warezcdn.site";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
 
@@ -118,7 +118,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_PARSE_ERROR`,
                 name: 'SuperFlix_Debug',
-                title: `Parse episodes error: ${e.message}`,
+                title: `Parse episodes error`,
                 quality: 0,
                 type: 'debug'
             }];
@@ -154,11 +154,10 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         });
         
         if (!optionsResponse.ok) {
-            const errorText = await optionsResponse.text();
             return [{
                 url: `DEBUG_OPTIONS_FAILED_${optionsResponse.status}`,
                 name: 'SuperFlix_Debug',
-                title: `Options failed: ${errorText.substring(0, 100)}`,
+                title: `Options failed`,
                 quality: 0,
                 type: 'debug'
             }];
@@ -170,13 +169,13 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_NO_VIDEO_ID`,
                 name: 'SuperFlix_Debug',
-                title: `No video ID in options`,
+                title: `No video ID`,
                 quality: 0,
                 type: 'debug'
             }];
         }
         
-        // 5. Source - COM DEBUG
+        // 5. Source
         const sourceParams = new URLSearchParams();
         sourceParams.append('video_id', videoId);
         sourceParams.append('page_token', SESSION_DATA.pageToken);
@@ -193,23 +192,32 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         });
         
         if (!sourceResponse.ok) {
-            const errorText = await sourceResponse.text();
             return [{
                 url: `DEBUG_SOURCE_FAILED_${sourceResponse.status}`,
                 name: 'SuperFlix_Debug',
-                title: `Source failed: ${errorText.substring(0, 100)}`,
+                title: `Source failed`,
                 quality: 0,
                 type: 'debug'
             }];
         }
         
-        // DEBUG: Mostra o JSON completo da source
-        const sourceText = await sourceResponse.text();
+        const sourceData = await sourceResponse.json();
+        const redirectUrl = sourceData?.data?.video_url;
+        if (!redirectUrl) {
+            return [{
+                url: `DEBUG_NO_REDIRECT_URL`,
+                name: 'SuperFlix_Debug',
+                title: `No redirect URL`,
+                quality: 0,
+                type: 'debug'
+            }];
+        }
         
+        // DEBUG: Mostra a URL de redirect que será usada
         return [{
-            url: `DEBUG_SOURCE_RESPONSE`,
+            url: `DEBUG_REDIRECT_URL_${redirectUrl.substring(0, 150)}`,
             name: 'SuperFlix_Debug',
-            title: sourceText.substring(0, 300),
+            title: `Redirect URL: ${redirectUrl}`,
             quality: 0,
             type: 'debug'
         }];
@@ -218,7 +226,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         return [{
             url: `DEBUG_CATCH_ERROR`,
             name: 'SuperFlix_Debug',
-            title: `${error.message.substring(0, 150)}`,
+            title: error.message.substring(0, 150),
             quality: 0,
             type: 'debug'
         }];
