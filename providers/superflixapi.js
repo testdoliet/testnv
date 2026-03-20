@@ -1,62 +1,90 @@
 // providers/superflix.js
-// SuperFlixAPI Provider for Nuvio - Versão final com headers forçados
+// SuperFlixAPI Provider for Nuvio - Versão com headers completos anti-bot
 
 const BASE_URL = "https://warezcdn.site";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
 
-// Store para cookies e tokens da sessão
 let SESSION_DATA = {
     cookies: '',
     csrfToken: '',
     pageToken: ''
 };
 
-// Headers para a página inicial
-const HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'pt-BR',
-    'Referer': 'https://lospobreflix.site/',
-    'Sec-Fetch-Dest': 'iframe',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'cross-site',
+// HEADERS COMPLETOS - Simulando Chrome no Android REAL
+const BROWSER_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
-    'Connection': 'keep-alive'
-};
-
-// Headers COMPLETOS para o redirect (mesmos que funcionaram no Termux)
-const REDIRECT_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
     'Sec-Fetch-Dest': 'iframe',
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-Site': 'cross-site',
     'Sec-Fetch-User': '?1',
-    'Upgrade-Insecure-Requests': '1',
-    'Connection': 'keep-alive'
+    'Cache-Control': 'max-age=0',
+    'Sec-Ch-Ua': '"Chromium";v="127", "Not)A;Brand";v="99", "Microsoft Edge Simulate";v="127", "Lemur";v="127"',
+    'Sec-Ch-Ua-Mobile': '?1',
+    'Sec-Ch-Ua-Platform': '"Android"',
+    'DNT': '1',
+    'Priority': 'u=0, i'
 };
 
-// Headers para as requisições API
+// Headers para API (AJAX)
 const API_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'pt-BR',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+    'Accept': 'application/json, text/javascript, */*; q=0.01',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Encoding': 'gzip, deflate, br',
     'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
     'X-Requested-With': 'XMLHttpRequest',
     'Origin': BASE_URL,
-    'Connection': 'keep-alive'
+    'Sec-Ch-Ua': '"Chromium";v="127", "Not)A;Brand";v="99", "Microsoft Edge Simulate";v="127", "Lemur";v="127"',
+    'Sec-Ch-Ua-Mobile': '?1',
+    'Sec-Ch-Ua-Platform': '"Android"',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    'Connection': 'keep-alive',
+    'DNT': '1'
 };
 
-// Headers para o player final
+// Headers para o redirect (simulando navegação)
+const REDIRECT_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Sec-Fetch-Dest': 'iframe',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'Connection': 'keep-alive',
+    'Sec-Ch-Ua': '"Chromium";v="127", "Not)A;Brand";v="99", "Microsoft Edge Simulate";v="127", "Lemur";v="127"',
+    'Sec-Ch-Ua-Mobile': '?1',
+    'Sec-Ch-Ua-Platform': '"Android"',
+    'DNT': '1',
+    'Cache-Control': 'max-age=0'
+};
+
+// Headers para o player final (vídeo)
 const VIDEO_HEADERS = {
     'Accept': '*/*',
-    'Accept-Language': 'pt-BR',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Encoding': 'gzip, deflate, br',
     'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
     'Origin': CDN_BASE,
     'Referer': `${CDN_BASE}/`,
     'X-Requested-With': 'XMLHttpRequest',
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+    'Sec-Ch-Ua': '"Chromium";v="127", "Not)A;Brand";v="99", "Microsoft Edge Simulate";v="127", "Lemur";v="127"',
+    'Sec-Ch-Ua-Mobile': '?1',
+    'Sec-Ch-Ua-Platform': '"Android"',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    'DNT': '1'
 };
 
 function updateCookies(response) {
@@ -75,12 +103,12 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     
     try {
-        // 1. Acessar página do player
+        // 1. Página inicial
         const pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
         
         const pageResponse = await fetch(pageUrl, {
             headers: {
-                ...HEADERS,
+                ...BROWSER_HEADERS,
                 ...getCookieHeader()
             }
         });
@@ -90,12 +118,12 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         
         let html = await pageResponse.text();
         
-        // Verificar se o HTML está legível
+        // Se HTML veio comprimido, tentar sem brotli
         let finalHtml = html;
-        if (!html.includes('var CSRF_TOKEN') && !html.includes('<!DOCTYPE')) {
+        if (!html.includes('var CSRF_TOKEN') && html.length < 50000) {
             const altResponse = await fetch(pageUrl, {
                 headers: {
-                    ...HEADERS,
+                    ...BROWSER_HEADERS,
                     ...getCookieHeader(),
                     'Accept-Encoding': 'gzip, deflate'
                 }
@@ -184,7 +212,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         const redirectUrl = sourceData?.data?.video_url;
         if (!redirectUrl) return [];
         
-        // 6. Seguir redirect com HEADERS COMPLETOS (forçados como no Termux)
+        // 6. Seguir redirect com headers COMPLETOS de navegador
         const redirectResponse = await fetch(redirectUrl, {
             method: 'GET',
             headers: {
@@ -200,10 +228,10 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         const playerUrl = redirectResponse.url;
         const playerHash = playerUrl.split('/').pop();
         
-        // 7. Obter dados do vídeo
+        // 7. Obter vídeo final
         const videoParams = new URLSearchParams();
         videoParams.append('hash', playerHash);
-        videoParams.append('r', '');
+        videoParams.append('r', BASE_URL);
         
         const videoResponse = await fetch(`${CDN_BASE}/player/index.php?data=${playerHash}&do=getVideo`, {
             method: 'POST',
@@ -217,7 +245,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         const finalUrl = videoData.securedLink || videoData.videoSource;
         if (!finalUrl) return [];
         
-        // 8. Determinar qualidade
+        // 8. Qualidade
         let quality = '1080p';
         if (finalUrl.includes('2160') || finalUrl.includes('4k')) quality = '2160p';
         else if (finalUrl.includes('1440')) quality = '1440p';
@@ -237,7 +265,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             quality: quality,
             headers: {
                 'Referer': `${CDN_BASE}/`,
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
+                'User-Agent': BROWSER_HEADERS['User-Agent']
             }
         }];
         
