@@ -99,11 +99,36 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         
         if (!contentId) return [];
         
-        // RETORNO 2: Content ID encontrado
+        // Options
+        const optionsParams = new URLSearchParams();
+        optionsParams.append('contentid', contentId);
+        optionsParams.append('type', 'serie');
+        optionsParams.append('_token', SESSION_DATA.csrfToken);
+        optionsParams.append('page_token', SESSION_DATA.pageToken);
+        optionsParams.append('pageToken', SESSION_DATA.pageToken);
+        
+        const optionsResponse = await fetch(`${BASE_URL}/player/options`, {
+            method: 'POST',
+            headers: {
+                ...API_HEADERS,
+                'X-Page-Token': SESSION_DATA.pageToken,
+                'Referer': pageUrl,
+                ...getCookieHeader()
+            },
+            body: optionsParams.toString()
+        });
+        
+        if (!optionsResponse.ok) return [];
+        
+        const optionsData = await optionsResponse.json();
+        const videoId = optionsData?.data?.options?.[0]?.ID;
+        if (!videoId) return [];
+        
+        // RETORNO 3: Video ID encontrado
         return [{
-            url: `DEBUG_STEP2_CONTENT_ID_${contentId}`,
+            url: `DEBUG_STEP3_VIDEO_ID_${videoId}`,
             name: 'SuperFlix_Debug',
-            title: `Step2: Content ID ${contentId}`,
+            title: `Step3: Video ID ${videoId}`,
             quality: 0,
             type: 'debug'
         }];
