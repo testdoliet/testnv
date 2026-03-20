@@ -146,11 +146,21 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         const redirectUrl = sourceData?.data?.video_url;
         if (!redirectUrl) return [];
         
-        // RETORNO 4: Redirect URL
+        // Seguir redirect para pegar o player hash
+        const redirectResponse = await fetch(redirectUrl, {
+            method: 'GET',
+            headers: { ...HEADERS, ...getCookieHeader() },
+            redirect: 'follow'
+        });
+        
+        const playerUrl = redirectResponse.url;
+        const playerHash = playerUrl.split('/').pop();
+        
+        // RETORNO 5: Player Hash
         return [{
-            url: redirectUrl,
+            url: `DEBUG_STEP5_PLAYER_HASH_${playerHash}`,
             name: 'SuperFlix_Debug',
-            title: `Step4: Redirect URL`,
+            title: `Step5: Player Hash ${playerHash}`,
             quality: 0,
             type: 'debug'
         }];
