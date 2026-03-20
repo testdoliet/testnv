@@ -46,7 +46,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     
     try {
-        // Página inicial
+        // ETAPA 1: Página inicial
         const pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
         const pageResponse = await fetch(pageUrl, {
             headers: { ...HEADERS, ...getCookieHeader() }
@@ -132,36 +132,32 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!sourceResponse.ok) return [];
         
         const sourceData = await sourceResponse.json();
-        let redirectUrl = sourceData?.data?.video_url;
+        const redirectUrl = sourceData?.data?.video_url;
         if (!redirectUrl) return [];
         
-        // Seguir todos os redirects até chegar no player real
+        // Seguir redirects e ver o que retorna
         let currentUrl = redirectUrl;
         let maxRedirects = 5;
-        let playerHash = null;
         
         for (let i = 0; i < maxRedirects; i++) {
             const redirectResponse = await fetch(currentUrl, {
                 method: 'GET',
                 headers: { ...HEADERS, ...getCookieHeader() },
-                redirect: 'manual'  // Não seguir automaticamente
+                redirect: 'manual'
             });
             
             const location = redirectResponse.headers.get('location');
             
             if (!location) {
-                // Não é redirect, verificar se é a página do player
+                // Não é redirect, pegar o conteúdo para debug
+                const contentType = redirectResponse.headers.get('content-type');
                 const text = await redirectResponse.text();
-                const hashMatch = text.match(/hash["']?\s*:\s*["']([^"']+)["']/);
-                if (hashMatch) {
-                    playerHash = hashMatch[1];
-                    break;
-                }
-                // Se não encontrou hash, retorna a URL atual
+                
+                // RETORNO DEBUG: Mostrar o que recebeu
                 return [{
-                    url: currentUrl,
+                    url: `DEBUG_${contentType || 'unknown'}_LEN_${text.length}`,
                     name: 'SuperFlix_Debug',
-                    title: `Step5_Final_URL`,
+                    title: `Resposta: ${text.substring(0, 300)}`,
                     quality: 0,
                     type: 'debug'
                 }];
@@ -170,27 +166,23 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             currentUrl = new URL(location, currentUrl).href;
         }
         
-        if (!playerHash) {
-            return [{
-                url: `DEBUG_STEP5_NO_HASH_${currentUrl.substring(0, 100)}`,
-                name: 'SuperFlix_Debug',
-                title: `Step5: No hash found`,
-                quality: 0,
-                type: 'debug'
-            }];
-        }
-        
-        // RETORNO 5: Player Hash
+        // Se chegou aqui, muitos redirects
         return [{
-            url: `DEBUG_STEP5_PLAYER_HASH_${playerHash}`,
+            url: `DEBUG_MAX_REDIRECTS_${currentUrl.substring(0, 150)}`,
             name: 'SuperFlix_Debug',
-            title: `Step5: Player Hash ${playerHash}`,
+            title: 'Max redirects reached',
             quality: 0,
             type: 'debug'
         }];
         
     } catch (error) {
-        return [];
+        return [{
+            url: `DEBUG_ERROR_${error.message.substring(0, 100)}`,
+            name: 'SuperFlix_Debug',
+            title: 'Error occurred',
+            quality: 0,
+            type: 'debug'
+        }];
     }
 }
 
