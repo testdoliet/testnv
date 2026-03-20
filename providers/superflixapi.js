@@ -1,4 +1,4 @@
-// providers/superflix.js - Versão com debug via stream
+// providers/superflix.js - Versão com debug da API source
 const BASE_URL = "https://warezcdn.site";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
 
@@ -41,29 +41,6 @@ function getCookieHeader() {
     return SESSION_DATA.cookies ? { 'Cookie': SESSION_DATA.cookies } : {};
 }
 
-// Função para seguir redirects manualmente com debug
-async function followRedirect(url, headers, stepName, maxRedirects = 5) {
-    let currentUrl = url;
-    
-    for (let i = 0; i < maxRedirects; i++) {
-        const response = await fetch(currentUrl, {
-            method: 'GET',
-            headers: headers,
-            redirect: 'manual'
-        });
-        
-        const location = response.headers.get('location');
-        
-        if (!location) {
-            return { response, finalUrl: currentUrl };
-        }
-        
-        currentUrl = new URL(location, currentUrl).href;
-    }
-    
-    return { error: 'Too many redirects', url: currentUrl };
-}
-
 async function getStreams(tmdbId, mediaType, season, episode) {
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
@@ -94,7 +71,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_NO_CSRF_TOKEN`,
                 name: 'SuperFlix_Debug',
-                title: `CSRF_TOKEN not found in HTML`,
+                title: `CSRF_TOKEN not found`,
                 quality: 0,
                 type: 'debug'
             }];
@@ -141,7 +118,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_PARSE_ERROR`,
                 name: 'SuperFlix_Debug',
-                title: `Failed to parse episodes: ${e.message}`,
+                title: `Parse episodes error: ${e.message}`,
                 quality: 0,
                 type: 'debug'
             }];
@@ -151,7 +128,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_NO_CONTENT_ID`,
                 name: 'SuperFlix_Debug',
-                title: `Content ID not found for episode ${targetEpisode}`,
+                title: `Content ID not found`,
                 quality: 0,
                 type: 'debug'
             }];
@@ -193,13 +170,13 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_NO_VIDEO_ID`,
                 name: 'SuperFlix_Debug',
-                title: `No video ID in options response`,
+                title: `No video ID in options`,
                 quality: 0,
                 type: 'debug'
             }];
         }
         
-        // 5. Source
+        // 5. Source - COM DEBUG
         const sourceParams = new URLSearchParams();
         sourceParams.append('video_id', videoId);
         sourceParams.append('page_token', SESSION_DATA.pageToken);
@@ -226,118 +203,15 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }];
         }
         
-        const sourceData = await sourceResponse.json();
-        const redirectUrl = sourceData?.data?.video_url;
-        if (!redirectUrl) {
-            return [{
-                url: `DEBUG_NO_REDIRECT_URL`,
-                name: 'SuperFlix_Debug',
-                title: `No redirect URL in source response`,
-                quality: 0,
-                type: 'debug'
-            }];
-        }
-        
-        // 6. Seguir redirect MANUALMENTE
-        const redirectHeaders = {
-            ...HEADERS,
-            'Referer': pageUrl,
-            ...getCookieHeader()
-        };
-        
-        const followResult = await followRedirect(redirectUrl, redirectHeaders, 'redirect');
-        
-        if (followResult.error) {
-            return [{
-                url: `DEBUG_REDIRECT_ERROR_${followResult.error}`,
-                name: 'SuperFlix_Debug',
-                title: `Redirect error: ${followResult.url}`,
-                quality: 0,
-                type: 'debug'
-            }];
-        }
-        
-        const finalResponse = followResult.response;
-        
-        if (!finalResponse.ok) {
-            return [{
-                url: `DEBUG_REDIRECT_HTTP_${finalResponse.status}`,
-                name: 'SuperFlix_Debug',
-                title: `Redirect response status: ${finalResponse.status}`,
-                quality: 0,
-                type: 'debug'
-            }];
-        }
-        
-        const playerUrl = finalResponse.url;
-        const playerHash = playerUrl.split('/').pop();
-        
-        // 7. Obter vídeo final
-        const videoParams = new URLSearchParams();
-        videoParams.append('hash', playerHash);
-        videoParams.append('r', '');
-        
-        const videoResponse = await fetch(`${CDN_BASE}/player/index.php?data=${playerHash}&do=getVideo`, {
-            method: 'POST',
-            headers: {
-                'Accept': '*/*',
-                'Accept-Language': 'pt-BR',
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'Origin': CDN_BASE,
-                'Referer': `${CDN_BASE}/`,
-                'X-Requested-With': 'XMLHttpRequest',
-                'User-Agent': HEADERS['User-Agent']
-            },
-            body: videoParams.toString()
-        });
-        
-        if (!videoResponse.ok) {
-            const errorText = await videoResponse.text();
-            return [{
-                url: `DEBUG_VIDEO_FAILED_${videoResponse.status}`,
-                name: 'SuperFlix_Debug',
-                title: `Video request failed: ${errorText.substring(0, 100)}`,
-                quality: 0,
-                type: 'debug'
-            }];
-        }
-        
-        const videoData = await videoResponse.json();
-        const finalUrl = videoData.securedLink || videoData.videoSource;
-        
-        if (!finalUrl) {
-            return [{
-                url: `DEBUG_NO_FINAL_URL`,
-                name: 'SuperFlix_Debug',
-                title: `No video URL in response`,
-                quality: 0,
-                type: 'debug'
-            }];
-        }
-        
-        // 8. Sucesso!
-        let quality = '1080p';
-        if (finalUrl.includes('2160') || finalUrl.includes('4k')) quality = '2160p';
-        else if (finalUrl.includes('1440')) quality = '1440p';
-        else if (finalUrl.includes('1080')) quality = '1080p';
-        else if (finalUrl.includes('720')) quality = '720p';
-        else if (finalUrl.includes('480')) quality = '480p';
-        
-        let title = `TMDB ${tmdbId}`;
-        if (mediaType === 'tv') {
-            title = `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
-        }
+        // DEBUG: Mostra o JSON completo da source
+        const sourceText = await sourceResponse.text();
         
         return [{
-            url: finalUrl,
-            name: 'SuperFlix',
-            title: title,
-            quality: quality,
-            type: 'hls',
-            headers: {
-                'Referer': `${CDN_BASE}/`,
-                'User-Agent': HEADERS['User-Agent']
-            }
+            url: `DEBUG_SOURCE_RESPONSE`,
+            name: 'SuperFlix_Debug',
+            title: sourceText.substring(0, 300),
+            quality: 0,
+            type: 'debug'
         }];
         
     } catch (error) {
