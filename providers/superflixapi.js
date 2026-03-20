@@ -1,4 +1,4 @@
-// providers/superflix.js - Versão com debug da redirect URL
+// providers/superflix.js - Versão com debug completo retornado no stream
 const BASE_URL = "https://warezcdn.site";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
 
@@ -45,50 +45,65 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     
+    const debugLog = [];
+    
+    function addDebug(step, data) {
+        debugLog.push(`[${step}] ${JSON.stringify(data).substring(0, 200)}`);
+    }
+    
     try {
         // 1. Página inicial
         const pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
+        addDebug('STEP1_START', { url: pageUrl });
+        
         const pageResponse = await fetch(pageUrl, {
             headers: { ...HEADERS, ...getCookieHeader() }
         });
         
+        addDebug('STEP1_RESPONSE', { status: pageResponse.status, ok: pageResponse.ok });
+        
         if (!pageResponse.ok) {
             return [{
-                url: `DEBUG_ERROR_PAGE_${pageResponse.status}`,
+                url: `DEBUG_FAILED`,
                 name: 'SuperFlix_Debug',
-                title: `Page failed: ${pageResponse.status}`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
         }
+        
         updateCookies(pageResponse);
+        addDebug('STEP1_COOKIES', { cookiesSet: !!SESSION_DATA.cookies });
         
         let html = await pageResponse.text();
+        addDebug('STEP1_HTML_LEN', html.length);
         
         // 2. Extrair tokens
         const csrfMatch = html.match(/var CSRF_TOKEN\s*=\s*["']([^"']+)["']/);
         if (!csrfMatch) {
             return [{
-                url: `DEBUG_NO_CSRF_TOKEN`,
+                url: `DEBUG_NO_CSRF`,
                 name: 'SuperFlix_Debug',
-                title: `CSRF_TOKEN not found`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
         }
         SESSION_DATA.csrfToken = csrfMatch[1];
+        addDebug('STEP2_CSRF', { token: SESSION_DATA.csrfToken.substring(0, 30) });
         
         const pageMatch = html.match(/var PAGE_TOKEN\s*=\s*["']([^"']+)["']/);
         if (!pageMatch) {
             return [{
-                url: `DEBUG_NO_PAGE_TOKEN`,
+                url: `DEBUG_NO_PAGE`,
                 name: 'SuperFlix_Debug',
-                title: `PAGE_TOKEN not found`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
         }
         SESSION_DATA.pageToken = pageMatch[1];
+        addDebug('STEP2_PAGE', { token: SESSION_DATA.pageToken.substring(0, 30) });
         
         // 3. Extrair ALL_EPISODES
         const epMatch = html.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
@@ -96,7 +111,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_NO_EPISODES`,
                 name: 'SuperFlix_Debug',
-                title: `ALL_EPISODES not found`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
@@ -118,7 +133,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_PARSE_ERROR`,
                 name: 'SuperFlix_Debug',
-                title: `Parse episodes error`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
@@ -128,11 +143,12 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             return [{
                 url: `DEBUG_NO_CONTENT_ID`,
                 name: 'SuperFlix_Debug',
-                title: `Content ID not found`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
         }
+        addDebug('STEP3_CONTENT_ID', contentId);
         
         // 4. Options
         const optionsParams = new URLSearchParams();
@@ -141,6 +157,8 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         optionsParams.append('_token', SESSION_DATA.csrfToken);
         optionsParams.append('page_token', SESSION_DATA.pageToken);
         optionsParams.append('pageToken', SESSION_DATA.pageToken);
+        
+        addDebug('STEP4_OPTIONS', { contentId, hasToken: !!SESSION_DATA.csrfToken });
         
         const optionsResponse = await fetch(`${BASE_URL}/player/options`, {
             method: 'POST',
@@ -153,11 +171,15 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             body: optionsParams.toString()
         });
         
+        addDebug('STEP4_RESPONSE', { status: optionsResponse.status, ok: optionsResponse.ok });
+        
         if (!optionsResponse.ok) {
+            const errorText = await optionsResponse.text();
+            addDebug('STEP4_ERROR', errorText.substring(0, 100));
             return [{
-                url: `DEBUG_OPTIONS_FAILED_${optionsResponse.status}`,
+                url: `DEBUG_OPTIONS_FAIL`,
                 name: 'SuperFlix_Debug',
-                title: `Options failed`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
@@ -166,20 +188,24 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         const optionsData = await optionsResponse.json();
         const videoId = optionsData?.data?.options?.[0]?.ID;
         if (!videoId) {
+            addDebug('STEP4_NO_VIDEO_ID', optionsData);
             return [{
                 url: `DEBUG_NO_VIDEO_ID`,
                 name: 'SuperFlix_Debug',
-                title: `No video ID`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
         }
+        addDebug('STEP4_VIDEO_ID', videoId);
         
         // 5. Source
         const sourceParams = new URLSearchParams();
         sourceParams.append('video_id', videoId);
         sourceParams.append('page_token', SESSION_DATA.pageToken);
         sourceParams.append('_token', SESSION_DATA.csrfToken);
+        
+        addDebug('STEP5_SOURCE', { videoId });
         
         const sourceResponse = await fetch(`${BASE_URL}/player/source`, {
             method: 'POST',
@@ -191,11 +217,15 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             body: sourceParams.toString()
         });
         
+        addDebug('STEP5_RESPONSE', { status: sourceResponse.status, ok: sourceResponse.ok });
+        
         if (!sourceResponse.ok) {
+            const errorText = await sourceResponse.text();
+            addDebug('STEP5_ERROR', errorText.substring(0, 100));
             return [{
-                url: `DEBUG_SOURCE_FAILED_${sourceResponse.status}`,
+                url: `DEBUG_SOURCE_FAIL`,
                 name: 'SuperFlix_Debug',
-                title: `Source failed`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
@@ -203,30 +233,60 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         
         const sourceData = await sourceResponse.json();
         const redirectUrl = sourceData?.data?.video_url;
+        
+        addDebug('STEP5_REDIRECT_URL', { url: redirectUrl ? redirectUrl.substring(0, 100) : 'null' });
+        
         if (!redirectUrl) {
             return [{
-                url: `DEBUG_NO_REDIRECT_URL`,
+                url: `DEBUG_NO_REDIRECT`,
                 name: 'SuperFlix_Debug',
-                title: `No redirect URL`,
+                title: debugLog.join(' | '),
                 quality: 0,
                 type: 'debug'
             }];
         }
         
-        // DEBUG: Mostra a URL de redirect que será usada
+        // 6. Testar redirect com headers
+        const redirectHeaders = {
+            ...HEADERS,
+            'Referer': pageUrl,
+            ...getCookieHeader()
+        };
+        
+        addDebug('STEP6_REDIRECT_HEADERS', { 
+            hasCookies: !!SESSION_DATA.cookies,
+            referer: pageUrl
+        });
+        
+        const redirectResponse = await fetch(redirectUrl, {
+            method: 'GET',
+            headers: redirectHeaders,
+            redirect: 'manual'
+        });
+        
+        addDebug('STEP6_REDIRECT_STATUS', { 
+            status: redirectResponse.status,
+            headers: Object.fromEntries(redirectResponse.headers.entries())
+        });
+        
+        const location = redirectResponse.headers.get('location');
+        addDebug('STEP6_LOCATION', location || 'no location');
+        
+        // RETORNA TODOS OS DEBUGS
         return [{
-            url: `DEBUG_REDIRECT_URL_${redirectUrl.substring(0, 150)}`,
+            url: `DEBUG_REDIRECT_COMPLETE`,
             name: 'SuperFlix_Debug',
-            title: `Redirect URL: ${redirectUrl}`,
+            title: debugLog.join(' | '),
             quality: 0,
             type: 'debug'
         }];
         
     } catch (error) {
+        addDebug('CATCH_ERROR', error.message);
         return [{
-            url: `DEBUG_CATCH_ERROR`,
+            url: `DEBUG_CATCH`,
             name: 'SuperFlix_Debug',
-            title: error.message.substring(0, 150),
+            title: debugLog.join(' | '),
             quality: 0,
             type: 'debug'
         }];
