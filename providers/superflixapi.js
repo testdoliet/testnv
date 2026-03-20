@@ -30,16 +30,6 @@ const API_HEADERS = {
     'Connection': 'keep-alive'
 };
 
-const VIDEO_HEADERS = {
-    'Accept': '*/*',
-    'Accept-Language': 'pt-BR',
-    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-    'Origin': CDN_BASE,
-    'Referer': `${CDN_BASE}/`,
-    'X-Requested-With': 'XMLHttpRequest',
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
-};
-
 function updateCookies(response) {
     const setCookie = response.headers.get('set-cookie');
     if (setCookie) {
@@ -56,14 +46,13 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     
     try {
-        // ETAPA 1: Página inicial
+        // Página inicial
         const pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
         const pageResponse = await fetch(pageUrl, {
             headers: { ...HEADERS, ...getCookieHeader() }
         });
         
         if (!pageResponse.ok) return [];
-        
         updateCookies(pageResponse);
         
         let html = await pageResponse.text();
@@ -143,18 +132,53 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!sourceResponse.ok) return [];
         
         const sourceData = await sourceResponse.json();
-        const redirectUrl = sourceData?.data?.video_url;
+        let redirectUrl = sourceData?.data?.video_url;
         if (!redirectUrl) return [];
         
-        // Seguir redirect para pegar o player hash
-        const redirectResponse = await fetch(redirectUrl, {
-            method: 'GET',
-            headers: { ...HEADERS, ...getCookieHeader() },
-            redirect: 'follow'
-        });
+        // Seguir todos os redirects até chegar no player real
+        let currentUrl = redirectUrl;
+        let maxRedirects = 5;
+        let playerHash = null;
         
-        const playerUrl = redirectResponse.url;
-        const playerHash = playerUrl.split('/').pop();
+        for (let i = 0; i < maxRedirects; i++) {
+            const redirectResponse = await fetch(currentUrl, {
+                method: 'GET',
+                headers: { ...HEADERS, ...getCookieHeader() },
+                redirect: 'manual'  // Não seguir automaticamente
+            });
+            
+            const location = redirectResponse.headers.get('location');
+            
+            if (!location) {
+                // Não é redirect, verificar se é a página do player
+                const text = await redirectResponse.text();
+                const hashMatch = text.match(/hash["']?\s*:\s*["']([^"']+)["']/);
+                if (hashMatch) {
+                    playerHash = hashMatch[1];
+                    break;
+                }
+                // Se não encontrou hash, retorna a URL atual
+                return [{
+                    url: currentUrl,
+                    name: 'SuperFlix_Debug',
+                    title: `Step5_Final_URL`,
+                    quality: 0,
+                    type: 'debug'
+                }];
+            }
+            
+            currentUrl = new URL(location, currentUrl).href;
+        }
+        
+        if (!playerHash) {
+            return [{
+                url: `DEBUG_STEP5_NO_HASH_${currentUrl.substring(0, 100)}`,
+                name: 'SuperFlix_Debug',
+                title: `Step5: No hash found`,
+                quality: 0,
+                type: 'debug'
+            }];
+        }
         
         // RETORNO 5: Player Hash
         return [{
