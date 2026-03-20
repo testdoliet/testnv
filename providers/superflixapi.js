@@ -269,15 +269,16 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         
         // Retornar array com um stream
         return [{
-            name: 'SuperFlix',
-            title: title,
-            url: finalUrl,
-            quality: quality,
-            headers: {
-                'Referer': `${CDN_BASE}/`,
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
-            }
-        }];
+  url: finalUrl,       // url em PRIMEIRO (igual aos que funcionam)
+  name: 'SuperFlix',
+  title: title,
+  quality: quality,
+  type: 'hls',
+  headers: {
+    'Referer': `${CDN_BASE}/`,
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
+  }
+}];
         
     } catch (error) {
         console.error('[SuperFlix] Error:', error.message);
