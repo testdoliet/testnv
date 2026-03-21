@@ -1,5 +1,5 @@
 // providers/superflix.js
-// SuperFlixAPI Provider for Nuvio - Versão final com suporte a filmes
+// SuperFlixAPI Provider for Nuvio - Versão final com suporte a filmes e séries
 
 const BASE_URL = "https://superflixapi.rest";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
@@ -62,7 +62,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     
     try {
-        // 1. Acessar página do player (URL diferente para filmes)
+        // 1. Acessar página (URL diferente para filmes)
         let pageUrl;
         if (mediaType === 'movie') {
             pageUrl = `${BASE_URL}/filme/${tmdbId}`;
@@ -104,25 +104,31 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!pageMatch) return [];
         SESSION_DATA.pageToken = pageMatch[1];
         
-        // 3. Extrair contentId (diferente para filmes)
+        // 3. Extrair contentId (diferente para filmes e séries)
         let contentId = null;
         
         if (mediaType === 'movie') {
-            // Para filmes: procurar data-contentid ou ID no HTML
-            const contentIdMatch = finalHtml.match(/data-contentid=["'](\d+)["']/);
-            if (contentIdMatch) {
-                contentId = contentIdMatch[1];
+            // Para filmes: procurar INITIAL_CONTENT_ID primeiro
+            const initialContentMatch = finalHtml.match(/INITIAL_CONTENT_ID\s*=\s*(\d+)/);
+            if (initialContentMatch) {
+                contentId = initialContentMatch[1];
             } else {
-                // Tentar extrair do ALL_EPISODES (filmes são tratados como temporada 1 episódio 1)
-                const epMatch = finalHtml.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
-                if (epMatch) {
-                    try {
-                        const episodes = JSON.parse(epMatch[1]);
-                        const seasonData = episodes["1"];
-                        if (seasonData && seasonData.length > 0) {
-                            contentId = seasonData[0].ID?.toString();
-                        }
-                    } catch (e) {}
+                // Fallback: data-contentid
+                const dataContentMatch = finalHtml.match(/data-contentid=["'](\d+)["']/);
+                if (dataContentMatch) {
+                    contentId = dataContentMatch[1];
+                } else {
+                    // Último recurso: tentar ALL_EPISODES (alguns filmes podem ter)
+                    const epMatch = finalHtml.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
+                    if (epMatch) {
+                        try {
+                            const episodes = JSON.parse(epMatch[1]);
+                            const seasonData = episodes["1"];
+                            if (seasonData && seasonData.length > 0) {
+                                contentId = seasonData[0].ID?.toString();
+                            }
+                        } catch (e) {}
+                    }
                 }
             }
         } else {
