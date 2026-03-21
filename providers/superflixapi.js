@@ -1,5 +1,5 @@
 // providers/superflix.js
-// SuperFlixAPI Provider for Nuvio - Versão sem redirect automático
+// SuperFlixAPI Provider for Nuvio - Versão com debug detalhado na URL
 
 const BASE_URL = "https://superflixapi.rest";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
@@ -51,7 +51,6 @@ function updateCookies(response) {
     const setCookie = response.headers.get('set-cookie');
     if (setCookie) {
         SESSION_DATA.cookies = setCookie;
-        console.log(`[SuperFlix] Cookies atualizados`);
     }
 }
 
@@ -61,65 +60,150 @@ function getCookieHeader() {
 }
 
 async function getStreams(tmdbId, mediaType, season, episode) {
-    console.log(`[SuperFlix] Fetching ${mediaType} ${tmdbId} S${season}E${episode}`);
-
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
-
+    
+    // Array para armazenar logs detalhados
+    const logs = [];
+    const startTime = Date.now();
+    
+    function addLog(step, data) {
+        const timestamp = Date.now() - startTime;
+        let logStr = `[${timestamp}ms][${step}] `;
+        if (typeof data === 'object') {
+            try {
+                logStr += JSON.stringify(data).substring(0, 200);
+            } catch(e) {
+                logStr += String(data);
+            }
+        } else {
+            logStr += String(data);
+        }
+        logs.push(logStr);
+    }
+    
     try {
+        addLog('INICIO', { tmdbId, mediaType, season: targetSeason, episode: targetEpisode });
+        
         // ==================== PASSO 1: CARREGAR PÁGINA ====================
         const pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
-        console.log(`[SuperFlix] Loading page: ${pageUrl}`);
-
-        const pageResponse = await fetch(pageUrl, {
-            headers: {
-                ...HEADERS,
-                ...getCookieHeader()
-            }
+        addLog('PAGE_URL', pageUrl);
+        
+        const pageHeaders = { ...HEADERS, ...getCookieHeader() };
+        addLog('PAGE_HEADERS', { 
+            UserAgent: pageHeaders['User-Agent'].substring(0, 50),
+            Referer: pageHeaders['Referer'],
+            HasCookie: !!pageHeaders['Cookie']
         });
-
+        
+        const pageStart = Date.now();
+        const pageResponse = await fetch(pageUrl, { headers: pageHeaders });
+        const pageTime = Date.now() - pageStart;
+        
+        addLog('PAGE_RESPONSE', { 
+            status: pageResponse.status, 
+            ok: pageResponse.ok,
+            timeMs: pageTime
+        });
+        
         if (!pageResponse.ok) {
-            throw new Error(`HTTP ${pageResponse.status}`);
+            addLog('PAGE_FAILED', pageResponse.status);
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
         }
-
+        
         updateCookies(pageResponse);
+        addLog('COOKIES_SET', { hasCookies: !!SESSION_DATA.cookies });
+        
         const html = await pageResponse.text();
-        console.log(`[SuperFlix] Page loaded: ${html.length} chars`);
-
+        addLog('HTML_LEN', html.length);
+        
         // ==================== PASSO 2: EXTRAIR TOKENS ====================
         const csrfMatch = html.match(/var CSRF_TOKEN\s*=\s*["']([^"']+)["']/);
-        if (!csrfMatch) throw new Error('CSRF_TOKEN not found');
+        if (!csrfMatch) {
+            addLog('CSRF_NOT_FOUND', html.substring(0, 200));
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
+        }
         SESSION_DATA.csrfToken = csrfMatch[1];
-        console.log(`[SuperFlix] CSRF_TOKEN found`);
-
+        addLog('CSRF_TOKEN', SESSION_DATA.csrfToken.substring(0, 30) + '...');
+        
         const pageMatch = html.match(/var PAGE_TOKEN\s*=\s*["']([^"']+)["']/);
-        if (!pageMatch) throw new Error('PAGE_TOKEN not found');
+        if (!pageMatch) {
+            addLog('PAGE_TOKEN_NOT_FOUND', true);
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
+        }
         SESSION_DATA.pageToken = pageMatch[1];
-        console.log(`[SuperFlix] PAGE_TOKEN found`);
-
+        addLog('PAGE_TOKEN', SESSION_DATA.pageToken.substring(0, 30) + '...');
+        
         // ==================== PASSO 3: EXTRAIR EPISÓDIOS ====================
         const epMatch = html.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
-        if (!epMatch) throw new Error('ALL_EPISODES not found');
-
+        if (!epMatch) {
+            addLog('ALL_EPISODES_NOT_FOUND', true);
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
+        }
+        
         let contentId = null;
         try {
             const episodes = JSON.parse(epMatch[1]);
+            addLog('EPISODES_KEYS', Object.keys(episodes));
+            
             const seasonData = episodes[targetSeason.toString()];
             if (seasonData) {
+                addLog('SEASON_DATA', { season: targetSeason, count: seasonData.length });
                 for (let i = 0; i < seasonData.length; i++) {
                     if (seasonData[i].epi_num === targetEpisode) {
                         contentId = seasonData[i].ID?.toString();
+                        addLog('EPISODE_FOUND', { episode: targetEpisode, contentId });
                         break;
                     }
                 }
             }
         } catch (e) {
-            throw new Error('Failed to parse episodes');
+            addLog('PARSE_ERROR', e.message);
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
         }
-
-        if (!contentId) throw new Error('Content ID not found');
-        console.log(`[SuperFlix] Content ID: ${contentId}`);
-
+        
+        if (!contentId) {
+            addLog('CONTENT_ID_NOT_FOUND', targetEpisode);
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
+        }
+        addLog('CONTENT_ID', contentId);
+        
         // ==================== PASSO 4: POST /player/options ====================
         const optionsParams = new URLSearchParams();
         optionsParams.append('contentid', contentId);
@@ -127,114 +211,149 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         optionsParams.append('_token', SESSION_DATA.csrfToken);
         optionsParams.append('page_token', SESSION_DATA.pageToken);
         optionsParams.append('pageToken', SESSION_DATA.pageToken);
-
+        
+        addLog('OPTIONS_PARAMS', { contentId, hasToken: !!SESSION_DATA.csrfToken });
+        
         const optionsHeaders = {
             ...API_HEADERS,
             'X-Page-Token': SESSION_DATA.pageToken,
             'Referer': pageUrl,
             ...getCookieHeader()
         };
-
-        console.log(`[SuperFlix] Requesting options...`);
-
+        
+        const optionsStart = Date.now();
         const optionsResponse = await fetch(`${BASE_URL}/player/options`, {
             method: 'POST',
             headers: optionsHeaders,
             body: optionsParams.toString()
         });
-
+        const optionsTime = Date.now() - optionsStart;
+        
+        addLog('OPTIONS_RESPONSE', { status: optionsResponse.status, timeMs: optionsTime });
+        
         if (!optionsResponse.ok) {
             const errorText = await optionsResponse.text();
-            console.error(`[SuperFlix] Options error (${optionsResponse.status}): ${errorText}`);
-            throw new Error(`Options failed: ${optionsResponse.status}`);
+            addLog('OPTIONS_ERROR', { status: optionsResponse.status, error: errorText.substring(0, 100) });
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
         }
-
+        
         const optionsData = await optionsResponse.json();
-        console.log(`[SuperFlix] Options response received`);
-
         const videoId = optionsData?.data?.options?.[0]?.ID;
-        if (!videoId) throw new Error('No video ID found');
-        console.log(`[SuperFlix] Video ID: ${videoId}`);
-
+        
+        if (!videoId) {
+            addLog('VIDEO_ID_NOT_FOUND', true);
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
+        }
+        addLog('VIDEO_ID', videoId);
+        
         // ==================== PASSO 5: POST /player/source ====================
         const sourceParams = new URLSearchParams();
         sourceParams.append('video_id', videoId);
         sourceParams.append('page_token', SESSION_DATA.pageToken);
         sourceParams.append('_token', SESSION_DATA.csrfToken);
-
+        
         const sourceHeaders = {
             ...API_HEADERS,
             'Referer': pageUrl,
             ...getCookieHeader()
         };
-
-        console.log(`[SuperFlix] Requesting source...`);
-
+        
+        const sourceStart = Date.now();
         const sourceResponse = await fetch(`${BASE_URL}/player/source`, {
             method: 'POST',
             headers: sourceHeaders,
             body: sourceParams.toString()
         });
-
+        const sourceTime = Date.now() - sourceStart;
+        
+        addLog('SOURCE_RESPONSE', { status: sourceResponse.status, timeMs: sourceTime });
+        
         if (!sourceResponse.ok) {
             const errorText = await sourceResponse.text();
-            console.error(`[SuperFlix] Source error (${sourceResponse.status}): ${errorText}`);
-            throw new Error(`Source failed: ${sourceResponse.status}`);
+            addLog('SOURCE_ERROR', { status: sourceResponse.status, error: errorText.substring(0, 100) });
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
         }
-
+        
         const sourceData = await sourceResponse.json();
-        console.log(`[SuperFlix] Source response received`);
-
         const redirectUrl = sourceData?.data?.video_url;
-        if (!redirectUrl) throw new Error('No redirect URL');
-        console.log(`[SuperFlix] Redirect URL obtained`);
-
+        
+        if (!redirectUrl) {
+            addLog('REDIRECT_URL_NOT_FOUND', true);
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
+        }
+        addLog('REDIRECT_URL', redirectUrl.substring(0, 100) + '...');
+        
         // ==================== PASSO 6: SEGUIR REDIRECT MANUALMENTE ====================
-        // IMPORTANTE: NÃO usar redirect: 'follow' - igual ao Python com allow_redirects=False
-        console.log(`[SuperFlix] Following redirect manually (no auto-follow)...`);
-
+        addLog('FOLLOW_REDIRECT', redirectUrl.substring(0, 80));
+        
+        const redirectStart = Date.now();
         const redirectResponse = await fetch(redirectUrl, {
             method: 'GET',
             headers: {
                 ...HEADERS,
                 ...getCookieHeader()
             },
-            redirect: 'manual'  // NÃO segue automaticamente
+            redirect: 'manual'
         });
-
-        console.log(`[SuperFlix] Redirect status: ${redirectResponse.status}`);
-
-        // Extrair Location do header
+        const redirectTime = Date.now() - redirectStart;
+        
+        addLog('REDIRECT_STATUS', { status: redirectResponse.status, timeMs: redirectTime });
+        
         let playerUrl = redirectResponse.headers.get('location');
-
-        // Se não tiver Location, tentar extrair do meta refresh no HTML
+        addLog('REDIRECT_LOCATION', playerUrl ? playerUrl.substring(0, 100) : 'null');
+        
         if (!playerUrl) {
             const htmlRedirect = await redirectResponse.text();
-            console.log(`[SuperFlix] No Location header, trying meta refresh...`);
+            addLog('REDIRECT_HTML_PREVIEW', htmlRedirect.substring(0, 300));
             
-            // Tenta vários padrões de meta refresh
             let metaMatch = htmlRedirect.match(/url=["']?([^"'>]+)["']?/i);
-            if (!metaMatch) {
-                metaMatch = htmlRedirect.match(/URL=([^\s"']+)/i);
-            }
-            if (!metaMatch) {
-                metaMatch = htmlRedirect.match(/content="0;url='([^']+)'/i);
-            }
+            if (!metaMatch) metaMatch = htmlRedirect.match(/URL=([^\s"']+)/i);
+            if (!metaMatch) metaMatch = htmlRedirect.match(/content="0;url='([^']+)'/i);
+            if (!metaMatch) metaMatch = htmlRedirect.match(/content="0;URL=([^"\s]+)/i);
             
             if (metaMatch) {
                 playerUrl = metaMatch[1];
-                console.log(`[SuperFlix] URL found in meta refresh: ${playerUrl}`);
+                addLog('META_REFRESH_FOUND', playerUrl.substring(0, 100));
+            } else {
+                addLog('NO_REDIRECT_FOUND', true);
+                return [{ 
+                    name: 'SuperFlix_Debug', 
+                    title: 'Debug', 
+                    url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                    quality: 0, 
+                    type: 'debug' 
+                }];
             }
         }
-
-        if (!playerUrl) {
-            console.error(`[SuperFlix] Could not find redirect URL`);
-            throw new Error('Could not find redirect URL');
-        }
-
-        console.log(`[SuperFlix] Player URL extracted: ${playerUrl}`);
-
+        
+        addLog('PLAYER_URL', playerUrl);
+        
         // ==================== PASSO 7: ACESSAR PLAYER ====================
+        const playerStart = Date.now();
         const playerResponse = await fetch(playerUrl, {
             method: 'GET',
             headers: {
@@ -242,66 +361,103 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 ...getCookieHeader()
             }
         });
-
+        const playerTime = Date.now() - playerStart;
+        
+        addLog('PLAYER_RESPONSE', { status: playerResponse.status, timeMs: playerTime });
+        
         if (!playerResponse.ok) {
-            throw new Error(`Player page failed: ${playerResponse.status}`);
+            const errorText = await playerResponse.text();
+            addLog('PLAYER_ERROR', { status: playerResponse.status, error: errorText.substring(0, 100) });
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
         }
-
+        
         const playerHash = playerUrl.split('/').pop();
-        console.log(`[SuperFlix] Player hash: ${playerHash}`);
-
+        addLog('PLAYER_HASH', playerHash);
+        
         // ==================== PASSO 8: OBTER URL FINAL DO VÍDEO ====================
         const videoParams = new URLSearchParams();
         videoParams.append('hash', playerHash);
         videoParams.append('r', '');
-
-        console.log(`[SuperFlix] Requesting final video...`);
-
+        
+        const videoStart = Date.now();
         const videoResponse = await fetch(`${CDN_BASE}/player/index.php?data=${playerHash}&do=getVideo`, {
             method: 'POST',
             headers: VIDEO_HEADERS,
             body: videoParams.toString()
         });
-
+        const videoTime = Date.now() - videoStart;
+        
+        addLog('VIDEO_RESPONSE', { status: videoResponse.status, timeMs: videoTime });
+        
         if (!videoResponse.ok) {
-            throw new Error(`Video data failed: ${videoResponse.status}`);
+            const errorText = await videoResponse.text();
+            addLog('VIDEO_ERROR', { status: videoResponse.status, error: errorText.substring(0, 100) });
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
         }
-
+        
         const videoData = await videoResponse.json();
         const finalUrl = videoData.securedLink || videoData.videoSource;
-        if (!finalUrl) throw new Error('No video URL found');
-
-        console.log(`[SuperFlix] SUCCESS! Video URL obtained`);
-
-        // ==================== PASSO 9: DETERMINAR QUALIDADE ====================
+        
+        if (!finalUrl) {
+            addLog('FINAL_URL_NOT_FOUND', true);
+            return [{ 
+                name: 'SuperFlix_Debug', 
+                title: 'Debug', 
+                url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+                quality: 0, 
+                type: 'debug' 
+            }];
+        }
+        
+        const totalTime = Date.now() - startTime;
+        addLog('SUCCESS', { totalTimeMs: totalTime, url: finalUrl.substring(0, 80) });
+        
+        // Determinar qualidade
         let quality = '1080p';
         if (finalUrl.includes('2160') || finalUrl.includes('4k')) quality = '2160p';
         else if (finalUrl.includes('1440')) quality = '1440p';
         else if (finalUrl.includes('1080')) quality = '1080p';
         else if (finalUrl.includes('720')) quality = '720p';
         else if (finalUrl.includes('480')) quality = '480p';
-
-        // Formatar título
+        
         let title = `TMDB ${tmdbId}`;
         if (mediaType === 'tv') {
             title = `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
         }
-
-        // ==================== PASSO 10: RETORNAR STREAM ====================
+        
+        // Retorna o stream com TODOS os logs na URL (codificados)
         return [{
             name: 'SuperFlix',
             title: title,
-            url: finalUrl,
+            url: `STREAM://${encodeURIComponent(logs.join(' | '))}\n${finalUrl}`,
             quality: quality,
             headers: {
                 'Referer': `${CDN_BASE}/`,
                 'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36'
             }
         }];
-
+        
     } catch (error) {
-        console.error('[SuperFlix] Error:', error.message);
-        return [];
+        addLog('CATCH_ERROR', { message: error.message, stack: error.stack?.substring(0, 200) });
+        return [{ 
+            name: 'SuperFlix_Debug', 
+            title: 'Debug', 
+            url: `DEBUG://${encodeURIComponent(logs.join(' | '))}`,
+            quality: 0, 
+            type: 'debug' 
+        }];
     }
 }
 
