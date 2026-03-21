@@ -1,5 +1,5 @@
 // providers/superflix.js
-// SuperFlixAPI Provider for Nuvio - Versão com debug no título e no nome
+// SuperFlixAPI Provider for Nuvio - Versão final (sem logs)
 
 const BASE_URL = "https://superflixapi.rest";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
@@ -61,75 +61,22 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     
-    // Array para armazenar logs no formato simplificado
-    const logs = [];
-    
-    function addLog(step, data) {
-        if (typeof data === 'object') {
-            try {
-                logs.push(`[${step}] ${JSON.stringify(data)}`);
-            } catch(e) {
-                logs.push(`[${step}] ${String(data)}`);
-            }
-        } else {
-            logs.push(`[${step}] ${data}`);
-        }
-    }
-    
-    // Função para retornar debug (usada em caso de erro ou sucesso parcial)
-    function returnDebug(debugName, finalUrl = null) {
-        const debugTitle = logs.join(' | ');
-        const debugNameStr = `DEBUG_${debugName}`;
-        
-        if (finalUrl) {
-            return [{
-                name: debugNameStr,
-                title: debugTitle,
-                url: finalUrl,
-                quality: 0,
-                type: 'debug'
-            }];
-        } else {
-            return [{
-                name: debugNameStr,
-                title: debugTitle,
-                url: `DEBUG_${debugName}`,
-                quality: 0,
-                type: 'debug'
-            }];
-        }
-    }
-    
     try {
-        addLog('START', { tmdbId, mediaType, season: targetSeason, episode: targetEpisode });
-        
-        // ==================== PASSO 1: CARREGAR PÁGINA ====================
+        // 1. Acessar página do player
         const pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
-        addLog('PAGE_URL', pageUrl);
         
         const pageResponse = await fetch(pageUrl, {
             headers: { ...HEADERS, ...getCookieHeader() }
         });
         
-        addLog('PAGE_STATUS', pageResponse.status);
-        
-        if (!pageResponse.ok) {
-            addLog('PAGE_FAILED', pageResponse.status);
-            return returnDebug('PAGE_FAILED');
-        }
-        
+        if (!pageResponse.ok) return [];
         updateCookies(pageResponse);
-        addLog('COOKIES_SET', !!SESSION_DATA.cookies);
         
-        const html = await pageResponse.text();
-        addLog('HTML_LEN', html.length);
+        let html = await pageResponse.text();
         
-        const isReadable = html.includes('var CSRF_TOKEN') || html.includes('<!DOCTYPE');
-        addLog('HTML_READABLE', isReadable);
-        
+        // Se não estiver legível, tentar sem Accept-Encoding br
         let finalHtml = html;
-        if (!isReadable) {
-            addLog('TRY_ALT_ENCODING', true);
+        if (!html.includes('var CSRF_TOKEN') && !html.includes('<!DOCTYPE')) {
             const altResponse = await fetch(pageUrl, {
                 headers: {
                     ...HEADERS,
@@ -140,33 +87,21 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             if (altResponse.ok) {
                 updateCookies(altResponse);
                 finalHtml = await altResponse.text();
-                addLog('ALT_HTML_LEN', finalHtml.length);
             }
         }
         
-        // ==================== PASSO 2: EXTRAIR TOKENS ====================
+        // 2. Extrair tokens
         const csrfMatch = finalHtml.match(/var CSRF_TOKEN\s*=\s*["']([^"']+)["']/);
-        if (!csrfMatch) {
-            addLog('CSRF_TOKEN_NOT_FOUND', true);
-            return returnDebug('NO_CSRF');
-        }
+        if (!csrfMatch) return [];
         SESSION_DATA.csrfToken = csrfMatch[1];
-        addLog('CSRF_TOKEN', SESSION_DATA.csrfToken.substring(0, 30) + '...');
         
         const pageMatch = finalHtml.match(/var PAGE_TOKEN\s*=\s*["']([^"']+)["']/);
-        if (!pageMatch) {
-            addLog('PAGE_TOKEN_NOT_FOUND', true);
-            return returnDebug('NO_PAGE');
-        }
+        if (!pageMatch) return [];
         SESSION_DATA.pageToken = pageMatch[1];
-        addLog('PAGE_TOKEN', SESSION_DATA.pageToken.substring(0, 30) + '...');
         
-        // ==================== PASSO 3: EXTRAIR EPISÓDIOS ====================
+        // 3. Extrair ALL_EPISODES e contentId
         const epMatch = finalHtml.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
-        if (!epMatch) {
-            addLog('ALL_EPISODES_NOT_FOUND', true);
-            return returnDebug('NO_EPISODES');
-        }
+        if (!epMatch) return [];
         
         let contentId = null;
         try {
@@ -176,31 +111,23 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 for (let i = 0; i < seasonData.length; i++) {
                     if (seasonData[i].epi_num === targetEpisode) {
                         contentId = seasonData[i].ID?.toString();
-                        addLog('EPISODE_FOUND', { episode: targetEpisode, contentId });
                         break;
                     }
                 }
             }
         } catch (e) {
-            addLog('PARSE_ERROR', e.message);
-            return returnDebug('PARSE_ERROR');
+            return [];
         }
         
-        if (!contentId) {
-            addLog('CONTENT_ID_NOT_FOUND', targetEpisode);
-            return returnDebug('NO_CONTENT');
-        }
-        addLog('CONTENT_ID', contentId);
+        if (!contentId) return [];
         
-        // ==================== PASSO 4: POST /player/options ====================
+        // 4. Options
         const optionsParams = new URLSearchParams();
         optionsParams.append('contentid', contentId);
         optionsParams.append('type', 'serie');
         optionsParams.append('_token', SESSION_DATA.csrfToken);
         optionsParams.append('page_token', SESSION_DATA.pageToken);
         optionsParams.append('pageToken', SESSION_DATA.pageToken);
-        
-        addLog('OPTIONS_REQUEST', { contentId });
         
         const optionsResponse = await fetch(`${BASE_URL}/player/options`, {
             method: 'POST',
@@ -213,29 +140,17 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             body: optionsParams.toString()
         });
         
-        addLog('OPTIONS_STATUS', optionsResponse.status);
-        
-        if (!optionsResponse.ok) {
-            const errorText = await optionsResponse.text();
-            addLog('OPTIONS_ERROR', { status: optionsResponse.status, error: errorText.substring(0, 100) });
-            return returnDebug('OPTIONS_FAIL');
-        }
+        if (!optionsResponse.ok) return [];
         
         const optionsData = await optionsResponse.json();
         const videoId = optionsData?.data?.options?.[0]?.ID;
-        if (!videoId) {
-            addLog('VIDEO_ID_NOT_FOUND', true);
-            return returnDebug('NO_VIDEO');
-        }
-        addLog('VIDEO_ID', videoId);
+        if (!videoId) return [];
         
-        // ==================== PASSO 5: POST /player/source ====================
+        // 5. Source
         const sourceParams = new URLSearchParams();
         sourceParams.append('video_id', videoId);
         sourceParams.append('page_token', SESSION_DATA.pageToken);
         sourceParams.append('_token', SESSION_DATA.csrfToken);
-        
-        addLog('SOURCE_REQUEST', { videoId });
         
         const sourceResponse = await fetch(`${BASE_URL}/player/source`, {
             method: 'POST',
@@ -247,26 +162,13 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             body: sourceParams.toString()
         });
         
-        addLog('SOURCE_STATUS', sourceResponse.status);
-        
-        if (!sourceResponse.ok) {
-            const errorText = await sourceResponse.text();
-            addLog('SOURCE_ERROR', { status: sourceResponse.status, error: errorText.substring(0, 100) });
-            return returnDebug('SOURCE_FAIL');
-        }
+        if (!sourceResponse.ok) return [];
         
         const sourceData = await sourceResponse.json();
         const redirectUrl = sourceData?.data?.video_url;
+        if (!redirectUrl) return [];
         
-        if (!redirectUrl) {
-            addLog('REDIRECT_URL_NOT_FOUND', true);
-            return returnDebug('NO_REDIRECT');
-        }
-        addLog('REDIRECT_URL', redirectUrl.substring(0, 100) + '...');
-        
-        // ==================== PASSO 6: SEGUIR REDIRECT ====================
-        addLog('FOLLOW_REDIRECT', redirectUrl.substring(0, 80));
-        
+        // 6. Seguir redirect
         const redirectResponse = await fetch(redirectUrl, {
             method: 'GET',
             headers: {
@@ -276,24 +178,15 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             redirect: 'follow'
         });
         
-        addLog('REDIRECT_STATUS', redirectResponse.status);
-        addLog('REDIRECT_URL_FINAL', redirectResponse.url);
-        
-        if (!redirectResponse.ok) {
-            addLog('REDIRECT_FAILED', redirectResponse.status);
-            return returnDebug('REDIRECT_FAIL');
-        }
+        if (!redirectResponse.ok) return [];
         
         const playerUrl = redirectResponse.url;
         const playerHash = playerUrl.split('/').pop();
-        addLog('PLAYER_HASH', playerHash);
         
-        // ==================== PASSO 7: OBTER VÍDEO FINAL ====================
+        // 7. Obter vídeo final
         const videoParams = new URLSearchParams();
         videoParams.append('hash', playerHash);
         videoParams.append('r', '');
-        
-        addLog('VIDEO_REQUEST', { hash: playerHash });
         
         const videoResponse = await fetch(`${CDN_BASE}/player/index.php?data=${playerHash}&do=getVideo`, {
             method: 'POST',
@@ -301,42 +194,28 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             body: videoParams.toString()
         });
         
-        addLog('VIDEO_STATUS', videoResponse.status);
-        
-        if (!videoResponse.ok) {
-            addLog('VIDEO_FAILED', videoResponse.status);
-            return returnDebug('VIDEO_FAIL');
-        }
+        if (!videoResponse.ok) return [];
         
         const videoData = await videoResponse.json();
         const finalUrl = videoData.securedLink || videoData.videoSource;
+        if (!finalUrl) return [];
         
-        if (!finalUrl) {
-            addLog('FINAL_URL_NOT_FOUND', true);
-            return returnDebug('NO_FINAL');
-        }
-        
-        addLog('SUCCESS', finalUrl.substring(0, 80));
-        
-        // ==================== PASSO 8: FORMATAR RESPOSTA ====================
-        let quality = '1080p';
-        if (finalUrl.includes('2160') || finalUrl.includes('4k')) quality = '2160p';
-        else if (finalUrl.includes('1440')) quality = '1440p';
-        else if (finalUrl.includes('1080')) quality = '1080p';
-        else if (finalUrl.includes('720')) quality = '720p';
-        else if (finalUrl.includes('480')) quality = '480p';
+        // 8. Determinar qualidade
+        let quality = 720;
+        if (finalUrl.includes('2160') || finalUrl.includes('4k')) quality = 2160;
+        else if (finalUrl.includes('1440')) quality = 1440;
+        else if (finalUrl.includes('1080')) quality = 1080;
+        else if (finalUrl.includes('720')) quality = 720;
+        else if (finalUrl.includes('480')) quality = 480;
         
         let title = `TMDB ${tmdbId}`;
         if (mediaType === 'tv') {
             title = `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
         }
         
-        // Retorna o stream com TODOS os logs no TÍTULO e no NAME
-        const debugTitle = logs.join(' | ');
-        
         return [{
-            name: `SuperFlix_Success_${quality}`,
-            title: title + ' | ' + debugTitle,
+            name: `SuperFlixAPI ${quality}p`,
+            title: title,
             url: finalUrl,
             quality: quality,
             headers: {
@@ -346,14 +225,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         }];
         
     } catch (error) {
-        addLog('CATCH_ERROR', error.message);
-        return [{
-            name: `SuperFlix_Debug_CATCH_${error.message.substring(0, 30)}`,
-            title: logs.join(' | '),
-            url: 'DEBUG_CATCH',
-            quality: 0,
-            type: 'debug'
-        }];
+        return [];
     }
 }
 
