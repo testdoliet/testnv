@@ -1,5 +1,5 @@
 // providers/superflix.js
-// SuperFlixAPI Provider for Nuvio - Versão final (sem logs)
+// SuperFlixAPI Provider for Nuvio - Versão final com suporte a filmes
 
 const BASE_URL = "https://superflixapi.rest";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
@@ -62,8 +62,13 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     
     try {
-        // 1. Acessar página do player
-        const pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
+        // 1. Acessar página do player (URL diferente para filmes)
+        let pageUrl;
+        if (mediaType === 'movie') {
+            pageUrl = `${BASE_URL}/filme/${tmdbId}`;
+        } else {
+            pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
+        }
         
         const pageResponse = await fetch(pageUrl, {
             headers: { ...HEADERS, ...getCookieHeader() }
@@ -99,24 +104,44 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!pageMatch) return [];
         SESSION_DATA.pageToken = pageMatch[1];
         
-        // 3. Extrair ALL_EPISODES e contentId
-        const epMatch = finalHtml.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
-        if (!epMatch) return [];
-        
+        // 3. Extrair contentId (diferente para filmes)
         let contentId = null;
-        try {
-            const episodes = JSON.parse(epMatch[1]);
-            const seasonData = episodes[targetSeason.toString()];
-            if (seasonData) {
-                for (let i = 0; i < seasonData.length; i++) {
-                    if (seasonData[i].epi_num === targetEpisode) {
-                        contentId = seasonData[i].ID?.toString();
-                        break;
-                    }
+        
+        if (mediaType === 'movie') {
+            // Para filmes: procurar data-contentid ou ID no HTML
+            const contentIdMatch = finalHtml.match(/data-contentid=["'](\d+)["']/);
+            if (contentIdMatch) {
+                contentId = contentIdMatch[1];
+            } else {
+                // Tentar extrair do ALL_EPISODES (filmes são tratados como temporada 1 episódio 1)
+                const epMatch = finalHtml.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
+                if (epMatch) {
+                    try {
+                        const episodes = JSON.parse(epMatch[1]);
+                        const seasonData = episodes["1"];
+                        if (seasonData && seasonData.length > 0) {
+                            contentId = seasonData[0].ID?.toString();
+                        }
+                    } catch (e) {}
                 }
             }
-        } catch (e) {
-            return [];
+        } else {
+            // Para séries: extrair do ALL_EPISODES
+            const epMatch = finalHtml.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
+            if (epMatch) {
+                try {
+                    const episodes = JSON.parse(epMatch[1]);
+                    const seasonData = episodes[targetSeason.toString()];
+                    if (seasonData) {
+                        for (let i = 0; i < seasonData.length; i++) {
+                            if (seasonData[i].epi_num === targetEpisode) {
+                                contentId = seasonData[i].ID?.toString();
+                                break;
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
         }
         
         if (!contentId) return [];
@@ -124,7 +149,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         // 4. Options
         const optionsParams = new URLSearchParams();
         optionsParams.append('contentid', contentId);
-        optionsParams.append('type', 'serie');
+        optionsParams.append('type', mediaType === 'movie' ? 'filme' : 'serie');
         optionsParams.append('_token', SESSION_DATA.csrfToken);
         optionsParams.append('page_token', SESSION_DATA.pageToken);
         optionsParams.append('pageToken', SESSION_DATA.pageToken);
@@ -208,8 +233,10 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         else if (finalUrl.includes('720')) quality = 720;
         else if (finalUrl.includes('480')) quality = 480;
         
-        let title = `TMDB ${tmdbId}`;
-        if (mediaType === 'tv') {
+        let title;
+        if (mediaType === 'movie') {
+            title = `Filme ${tmdbId}`;
+        } else {
             title = `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
         }
         
