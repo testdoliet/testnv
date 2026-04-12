@@ -1,6 +1,3 @@
-// providers/superflix.js
-// SuperFlixAPI Provider - Com suporte a Blogger (para animes)
-
 const BASE_URL = "https://superflixapi.rest";
 const CDN_BASE = "https://llanfairpwllgwyngy.com";
 
@@ -43,7 +40,6 @@ function getCookieHeader() {
     return SESSION_DATA.cookies ? { 'Cookie': SESSION_DATA.cookies } : {};
 }
 
-// ==================== EXTRATOR BLOGGER ====================
 const ITAG_QUALITY_MAP = {
     18: 360,
     22: 720,
@@ -108,127 +104,100 @@ function generateRandomString(length) {
 }
 
 async function generateCpn(token, videoId, timestamp) {
-    try {
-        const seed = `boq_bloggeruiserver_20260223.02_p0${videoId}${timestamp}${token}`;
-        const encoder = new TextEncoder();
-        const data = encoder.encode(seed);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashBase64 = btoa(String.fromCharCode.apply(null, hashArray));
-        return hashBase64.substring(0, 16).replace(/[+/=]/g, '');
-    } catch (e) {
-        return generateRandomString(16);
-    }
+    const seed = `boq_bloggeruiserver_20260223.02_p0${videoId}${timestamp}${token}`;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(seed);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashBase64 = btoa(String.fromCharCode.apply(null, hashArray));
+    return hashBase64.substring(0, 16).replace(/[+/=]/g, '');
 }
 
 async function extractBloggerVideo(bloggerUrl, referer, serverType, quality, title, callback) {
-    try {
-        console.log(`[Blogger] Extraindo vídeo de: ${bloggerUrl}`);
+    const token = extractTokenFromUrl(bloggerUrl);
+    if (!token) return false;
+    
+    const apiUrl = 'https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute';
+    const reqid = Math.floor(Math.random() * 90000) + 10000;
+    const fSid = '-7535563745894756252';
+    const bl = 'boq_bloggeruiserver_20260223.02_p0';
+    
+    const headers = {
+        'authority': 'www.blogger.com',
+        'accept': '*/*',
+        'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'origin': 'https://www.blogger.com',
+        'referer': 'https://www.blogger.com/',
+        'user-agent': getRandomUserAgent(),
+        'sec-ch-ua': '"Chromium";v="127", "Not)A;Brand";v="99", "Microsoft Edge Simulate";v="127", "Lemur";v="127"',
+        'sec-ch-ua-mobile': '?1',
+        'sec-ch-ua-platform': '"Android"',
+        'x-client-data': 'COjuygE=',
+        'x-same-domain': '1'
+    };
+    
+    const urlWithParams = `${apiUrl}?rpcids=WcwnYd&source-path=%2Fvideo.g&f.sid=${fSid}&bl=${bl}&hl=pt-BR&_reqid=${reqid}&rt=c`;
+    
+    const body = `f.req=%5B%5B%5B%22WcwnYd%22%2C%22%5B%5C%22${token}%5C%22%2C%5C%22%5C%22%2C0%5D%22%2Cnull%2C%22generic%22%5D%5D%5D`;
+    
+    const response = await fetch(urlWithParams, {
+        method: 'POST',
+        headers: headers,
+        body: body
+    });
+    
+    if (!response.ok) return false;
+    
+    const responseText = await response.text();
+    const videoUrls = extractVideoUrlsFromResponse(responseText);
+    
+    if (videoUrls.length === 0) return false;
+    
+    const timestamp = Date.now();
+    
+    for (const [videoUrl, itag] of videoUrls) {
+        const videoQuality = ITAG_QUALITY_MAP[itag] || 480;
+        const videoId = extractVideoId(videoUrl);
+        const cpn = await generateCpn(token, videoId, timestamp);
         
-        const token = extractTokenFromUrl(bloggerUrl);
-        if (!token) {
-            console.log(`[Blogger] Token não encontrado`);
-            return false;
+        let urlBase = decodeUrl(videoUrl);
+        let urlFinal = urlBase;
+        
+        if (urlBase.includes('?')) {
+            urlFinal = `${urlBase}&cpn=${cpn}&c=WEB_EMBEDDED_PLAYER&cver=1.20260224.08.00`;
+        } else {
+            urlFinal = `${urlBase}?cpn=${cpn}&c=WEB_EMBEDDED_PLAYER&cver=1.20260224.08.00`;
         }
         
-        const apiUrl = 'https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute';
-        const reqid = Math.floor(Math.random() * 90000) + 10000;
-        const fSid = '-7535563745894756252';
-        const bl = 'boq_bloggeruiserver_20260223.02_p0';
-        
-        const headers = {
-            'authority': 'www.blogger.com',
-            'accept': '*/*',
-            'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
-            'origin': 'https://www.blogger.com',
-            'referer': 'https://www.blogger.com/',
-            'user-agent': getRandomUserAgent(),
-            'sec-ch-ua': '"Chromium";v="127", "Not)A;Brand";v="99", "Microsoft Edge Simulate";v="127", "Lemur";v="127"',
-            'sec-ch-ua-mobile': '?1',
-            'sec-ch-ua-platform': '"Android"',
-            'x-client-data': 'COjuygE=',
-            'x-same-domain': '1'
-        };
-        
-        const urlWithParams = `${apiUrl}?rpcids=WcwnYd&source-path=%2Fvideo.g&f.sid=${fSid}&bl=${bl}&hl=pt-BR&_reqid=${reqid}&rt=c`;
-        
-        const body = `f.req=%5B%5B%5B%22WcwnYd%22%2C%22%5B%5C%22${token}%5C%22%2C%5C%22%5C%22%2C0%5D%22%2Cnull%2C%22generic%22%5D%5D%5D`;
-        
-        const response = await fetch(urlWithParams, {
-            method: 'POST',
-            headers: headers,
-            body: body
-        });
-        
-        if (!response.ok) {
-            console.log(`[Blogger] API error: ${response.status}`);
-            return false;
-        }
-        
-        const responseText = await response.text();
-        
-        // Extrair URLs do vídeo da resposta
-        const videoUrls = extractVideoUrlsFromResponse(responseText);
-        
-        if (videoUrls.length === 0) {
-            console.log(`[Blogger] Nenhuma URL de vídeo encontrada`);
-            return false;
-        }
-        
-        const timestamp = Date.now();
-        
-        for (const [videoUrl, itag] of videoUrls) {
-            const videoQuality = ITAG_QUALITY_MAP[itag] || 480;
-            const videoId = extractVideoId(videoUrl);
-            const cpn = await generateCpn(token, videoId, timestamp);
-            
-            let urlBase = decodeUrl(videoUrl);
-            let urlFinal = urlBase;
-            
-            if (urlBase.includes('?')) {
-                urlFinal = `${urlBase}&cpn=${cpn}&c=WEB_EMBEDDED_PLAYER&cver=1.20260224.08.00`;
-            } else {
-                urlFinal = `${urlBase}?cpn=${cpn}&c=WEB_EMBEDDED_PLAYER&cver=1.20260224.08.00`;
+        callback({
+            name: `SuperFlix ${serverType} ${videoQuality}p`,
+            title: title,
+            url: urlFinal,
+            quality: videoQuality,
+            headers: {
+                'Referer': 'https://youtube.googleapis.com/',
+                'User-Agent': getRandomUserAgent(),
+                'Accept': '*/*',
+                'Accept-Language': 'pt-BR',
+                'Range': 'bytes=0-',
+                'sec-ch-ua': '"Chromium";v="127", "Not)A;Brand";v="99", "Microsoft Edge Simulate";v="127", "Lemur";v="127"',
+                'sec-ch-ua-mobile': '?1',
+                'sec-ch-ua-platform': '"Android"',
+                'sec-fetch-dest': 'video',
+                'sec-fetch-mode': 'no-cors',
+                'sec-fetch-site': 'cross-site'
             }
-            
-            console.log(`[Blogger] URL encontrada: ${urlFinal.substring(0, 100)}...`);
-            
-            callback({
-                name: `SuperFlix ${serverType} ${videoQuality}p`,
-                title: title,
-                url: urlFinal,
-                quality: videoQuality,
-                headers: {
-                    'Referer': 'https://youtube.googleapis.com/',
-                    'User-Agent': getRandomUserAgent(),
-                    'Accept': '*/*',
-                    'Accept-Language': 'pt-BR',
-                    'Range': 'bytes=0-',
-                    'sec-ch-ua': '"Chromium";v="127", "Not)A;Brand";v="99", "Microsoft Edge Simulate";v="127", "Lemur";v="127"',
-                    'sec-ch-ua-mobile': '?1',
-                    'sec-ch-ua-platform': '"Android"',
-                    'sec-fetch-dest': 'video',
-                    'sec-fetch-mode': 'no-cors',
-                    'sec-fetch-site': 'cross-site'
-                }
-            });
-        }
-        
-        return true;
-        
-    } catch (error) {
-        console.log(`[Blogger] Erro: ${error.message}`);
-        return false;
+        });
     }
+    
+    return true;
 }
 
 function extractVideoUrlsFromResponse(response) {
     const videos = [];
     
-    // Remover o prefixo )]}'\n
     let data = response.replace(/^\)\]\}'\n/, '');
     
-    // Extrair o JSON
     const jsonPattern = /\[\s*\[\s*"wrb\.fr"\s*,\s*"[^"]*"\s*,\s*"(.+?)"\s*\]/s;
     const match = data.match(jsonPattern);
     
@@ -238,7 +207,6 @@ function extractVideoUrlsFromResponse(response) {
         jsonStr = jsonStr.replace(/\\\\/g, '\\');
         jsonStr = decodeUnicodeEscapes(jsonStr);
         
-        // Extrair URLs com itag
         const urlPattern = /"((?:https?:\\\/\\\/)?[^"]+?googlevideo[^"]+?)",\[(\d+)\]/g;
         let urlMatch;
         while ((urlMatch = urlPattern.exec(jsonStr)) !== null) {
@@ -248,7 +216,6 @@ function extractVideoUrlsFromResponse(response) {
             videos.push([url, itag]);
         }
         
-        // Se não encontrou, tentar padrão mais simples
         if (videos.length === 0) {
             const simplePattern = /https?:\\?\/\\?\/[^"'\s]+?googlevideo[^"'\s]+/g;
             let simpleMatch;
@@ -262,7 +229,6 @@ function extractVideoUrlsFromResponse(response) {
         }
     }
     
-    // Ordenar por qualidade (1080p > 720p > 480p > 360p)
     const qualityOrder = [37, 22, 18, 59];
     videos.sort((a, b) => {
         const indexA = qualityOrder.indexOf(a[1]);
@@ -270,7 +236,6 @@ function extractVideoUrlsFromResponse(response) {
         return indexA - indexB;
     });
     
-    // Remover duplicados
     const seen = new Set();
     return videos.filter(([url, itag]) => {
         const key = `${url}_${itag}`;
@@ -286,18 +251,12 @@ function decodeUnicodeEscapes(text) {
     });
 }
 
-// ==================== FUNÇÃO PRINCIPAL ====================
 async function getStreams(tmdbId, mediaType, season, episode) {
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     const results = [];
     
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`[SuperFlix] Buscando: ${mediaType} ${tmdbId} S${targetSeason}E${targetEpisode}`);
-    console.log(`${'='.repeat(60)}`);
-    
     try {
-        // 1. Página inicial
         let pageUrl;
         if (mediaType === 'movie') {
             pageUrl = `${BASE_URL}/filme/${tmdbId}`;
@@ -305,23 +264,17 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             pageUrl = `${BASE_URL}/serie/${tmdbId}/${targetSeason}/${targetEpisode}`;
         }
         
-        console.log(`[1] Página: ${pageUrl}`);
-        
         const pageResponse = await fetch(pageUrl, {
             headers: { ...HEADERS, ...getCookieHeader() }
         });
-        
-        console.log(`[1] Status: ${pageResponse.status}`);
         
         if (!pageResponse.ok) return [];
         updateCookies(pageResponse);
         
         let html = await pageResponse.text();
-        console.log(`[1] HTML: ${html.length} caracteres`);
         
         let finalHtml = html;
         if (!html.includes('var CSRF_TOKEN') && !html.includes('<!DOCTYPE')) {
-            console.log(`[1] HTML comprimido, tentando sem brotli...`);
             const altResponse = await fetch(pageUrl, {
                 headers: {
                     ...HEADERS,
@@ -332,66 +285,51 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             if (altResponse.ok) {
                 updateCookies(altResponse);
                 finalHtml = await altResponse.text();
-                console.log(`[1] HTML alternativo: ${finalHtml.length} caracteres`);
             }
         }
         
-        // 2. Extrair tokens
         const csrfMatch = finalHtml.match(/var CSRF_TOKEN\s*=\s*["']([^"']+)["']/);
         if (!csrfMatch) return [];
         SESSION_DATA.csrfToken = csrfMatch[1];
-        console.log(`[2] CSRF_TOKEN: ${SESSION_DATA.csrfToken.substring(0, 30)}...`);
         
         const pageMatch = finalHtml.match(/var PAGE_TOKEN\s*=\s*["']([^"']+)["']/);
         if (!pageMatch) return [];
         SESSION_DATA.pageToken = pageMatch[1];
-        console.log(`[2] PAGE_TOKEN: ${SESSION_DATA.pageToken.substring(0, 30)}...`);
         
-        // 3. Extrair contentId
         let contentId = null;
         
         if (mediaType === 'movie') {
             const initialContentMatch = finalHtml.match(/INITIAL_CONTENT_ID\s*=\s*(\d+)/);
             if (initialContentMatch) {
                 contentId = initialContentMatch[1];
-                console.log(`[3] CONTENT_ID (filme): ${contentId}`);
             } else {
                 const dataContentMatch = finalHtml.match(/data-contentid=["'](\d+)["']/);
                 if (dataContentMatch) contentId = dataContentMatch[1];
-                console.log(`[3] CONTENT_ID (fallback): ${contentId}`);
             }
         } else {
             const epMatch = finalHtml.match(/var ALL_EPISODES\s*=\s*(\{.*?\});/s);
             if (epMatch) {
-                try {
-                    const episodes = JSON.parse(epMatch[1]);
-                    const seasonData = episodes[targetSeason.toString()];
-                    if (seasonData) {
-                        for (let i = 0; i < seasonData.length; i++) {
-                            if (seasonData[i].epi_num === targetEpisode) {
-                                contentId = seasonData[i].ID?.toString();
-                                console.log(`[3] CONTENT_ID (série): ${contentId} (episódio ${targetEpisode})`);
-                                break;
-                            }
+                const episodes = JSON.parse(epMatch[1]);
+                const seasonData = episodes[targetSeason.toString()];
+                if (seasonData) {
+                    for (let i = 0; i < seasonData.length; i++) {
+                        if (seasonData[i].epi_num === targetEpisode) {
+                            contentId = seasonData[i].ID?.toString();
+                            break;
                         }
                     }
-                } catch (e) {
-                    console.log(`[3] ERRO ao parsear episódios: ${e.message}`);
                 }
             }
         }
         
         if (!contentId) return [];
         
-        // 4. Options
         const optionsParams = new URLSearchParams();
         optionsParams.append('contentid', contentId);
         optionsParams.append('type', mediaType === 'movie' ? 'filme' : 'serie');
         optionsParams.append('_token', SESSION_DATA.csrfToken);
         optionsParams.append('page_token', SESSION_DATA.pageToken);
         optionsParams.append('pageToken', SESSION_DATA.pageToken);
-        
-        console.log(`[4] Options: contentId=${contentId}, type=${mediaType === 'movie' ? 'filme' : 'serie'}`);
         
         const optionsResponse = await fetch(`${BASE_URL}/player/options`, {
             method: 'POST',
@@ -404,29 +342,20 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             body: optionsParams.toString()
         });
         
-        console.log(`[4] Options status: ${optionsResponse.status}`);
-        
         if (!optionsResponse.ok) return [];
         
         const optionsData = await optionsResponse.json();
         const optionsArray = optionsData?.data?.options || [];
-        console.log(`[4] Options count: ${optionsArray.length}`);
         
-        // 5. Processar CADA servidor
         for (let i = 0; i < optionsArray.length; i++) {
             const option = optionsArray[i];
             const videoId = option.ID;
             const serverType = option.type === 1 ? 'Dublado' : (option.type === 2 ? 'Legendado' : `Tipo ${option.type}`);
             
-            console.log(`\n[5.${i}] Processando ${serverType} (ID: ${videoId})`);
-            
-            // Source
             const sourceParams = new URLSearchParams();
             sourceParams.append('video_id', videoId);
             sourceParams.append('page_token', SESSION_DATA.pageToken);
             sourceParams.append('_token', SESSION_DATA.csrfToken);
-            
-            console.log(`[5.${i}] Source: video_id=${videoId}`);
             
             const sourceResponse = await fetch(`${BASE_URL}/player/source`, {
                 method: 'POST',
@@ -438,22 +367,12 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 body: sourceParams.toString()
             });
             
-            console.log(`[5.${i}] Source status: ${sourceResponse.status}`);
-            
-            if (!sourceResponse.ok) {
-                const errorText = await sourceResponse.text();
-                console.log(`[5.${i}] Source error: ${errorText.substring(0, 200)}`);
-                continue;
-            }
+            if (!sourceResponse.ok) continue;
             
             const sourceData = await sourceResponse.json();
             const redirectUrl = sourceData?.data?.video_url;
-            console.log(`[5.${i}] Redirect URL: ${redirectUrl ? redirectUrl.substring(0, 100) + '...' : 'null'}`);
             
             if (!redirectUrl) continue;
-            
-            // Seguir redirect
-            console.log(`[5.${i}] Seguindo redirect...`);
             
             const redirectResponse = await fetch(redirectUrl, {
                 method: 'GET',
@@ -461,47 +380,28 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                     ...HEADERS,
                     ...getCookieHeader()
                 },
-                redirect: 'manual' // Não seguir automaticamente para verificar
+                redirect: 'manual'
             });
-            
-            console.log(`[5.${i}] Redirect status: ${redirectResponse.status}`);
             
             const location = redirectResponse.headers.get('location');
             const finalUrl = location || redirectResponse.url;
-            console.log(`[5.${i}] URL final: ${finalUrl}`);
             
-            if (!redirectResponse.ok && !location) {
-                console.log(`[5.${i}] ERRO: Redirect falhou`);
-                continue;
-            }
+            if (!redirectResponse.ok && !location) continue;
             
-            // Verificar se é URL do Blogger
             if (finalUrl.includes('blogger.com/video.g') || finalUrl.includes('blogger.com')) {
-                console.log(`[5.${i}] Detectado Blogger - processando via extrator`);
-                
                 const title = mediaType === 'movie' ? `Filme ${tmdbId}` : `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
                 
-                const success = await extractBloggerVideo(finalUrl, pageUrl, serverType, 720, title, (stream) => {
+                await extractBloggerVideo(finalUrl, pageUrl, serverType, 720, title, (stream) => {
                     results.push(stream);
                 });
-                
-                if (success) {
-                    console.log(`[5.${i}] ✅ Blogger processado com sucesso!`);
-                } else {
-                    console.log(`[5.${i}] ❌ Blogger falhou`);
-                }
                 continue;
             }
             
-            // Processamento normal (HLS)
             const playerHash = finalUrl.split('/').pop();
-            console.log(`[5.${i}] Player hash: ${playerHash}`);
             
             const videoParams = new URLSearchParams();
             videoParams.append('hash', playerHash);
             videoParams.append('r', '');
-            
-            console.log(`[5.${i}] Obtendo vídeo final...`);
             
             const videoResponse = await fetch(`${CDN_BASE}/player/index.php?data=${playerHash}&do=getVideo`, {
                 method: 'POST',
@@ -517,13 +417,10 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 body: videoParams.toString()
             });
             
-            console.log(`[5.${i}] Video status: ${videoResponse.status}`);
-            
             if (!videoResponse.ok) continue;
             
             const videoData = await videoResponse.json();
             const videoUrl = videoData.securedLink || videoData.videoSource;
-            console.log(`[5.${i}] Video URL: ${videoUrl ? videoUrl.substring(0, 100) + '...' : 'null'}`);
             
             if (!videoUrl) continue;
             
@@ -541,8 +438,6 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 title = `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
             }
             
-            console.log(`[5.${i}] ✅ SUCESSO! ${serverType} ${quality}p`);
-            
             results.push({
                 name: `SuperFlix ${serverType} ${quality}p`,
                 title: title,
@@ -555,14 +450,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             });
         }
         
-        console.log(`\n${'='.repeat(60)}`);
-        console.log(`[SuperFlix] Total streams encontrados: ${results.length}`);
-        console.log(`${'='.repeat(60)}`);
-        
         return results;
         
     } catch (error) {
-        console.log(`\n[SuperFlix] ERRO: ${error.message}`);
         return [];
     }
 }
