@@ -1,6 +1,6 @@
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
-const CDN_PROXY = 'https://ondemand.towns3.shop';
+const CDN_PROXY = 'https://ondemand.mylifekorea.shop';
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0',
