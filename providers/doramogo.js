@@ -1,6 +1,6 @@
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
-const CDN_PROXY = 'https://ondemand.towns3.shop';
+const CDN_PROXY = 'https://ondemand.mylifekorea.shop';
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0',
@@ -26,6 +26,42 @@ async function testUrl(url) {
         return response.ok || response.status === 206;
     } catch {
         return false;
+    }
+}
+
+async function extractQualitiesFromM3u8(url) {
+    try {
+        const response = await fetch(url, { headers: HEADERS });
+        const content = await response.text();
+        
+        const qualities = [];
+        const lines = content.split('\n');
+        const resolutionPattern = /RESOLUTION=(\d+)x(\d+)/;
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const match = resolutionPattern.exec(line);
+            
+            if (match) {
+                const height = parseInt(match[2]);
+                let streamUrl = lines[i + 1]?.trim();
+                
+                if (streamUrl && !streamUrl.startsWith('http')) {
+                    const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
+                    streamUrl = streamUrl.startsWith('/') 
+                        ? new URL(streamUrl, url).href 
+                        : baseUrl + streamUrl;
+                }
+                
+                if (streamUrl && streamUrl.startsWith('http')) {
+                    qualities.push({ url: streamUrl, height });
+                }
+            }
+        }
+        
+        return qualities;
+    } catch {
+        return [];
     }
 }
 
@@ -98,43 +134,7 @@ function generateSlugVariations(baseTitle, season, ano) {
     return variations;
 }
 
-async function extractQualitiesFromM3u8(url) {
-    try {
-        const response = await fetch(url, { headers: HEADERS });
-        const content = await response.text();
-        
-        const qualities = [];
-        const lines = content.split('\n');
-        const resolutionPattern = /RESOLUTION=(\d+)x(\d+)/;
-        
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            const match = resolutionPattern.exec(line);
-            
-            if (match) {
-                const height = parseInt(match[2]);
-                let streamUrl = lines[i + 1]?.trim();
-                
-                if (streamUrl && !streamUrl.startsWith('http')) {
-                    const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
-                    streamUrl = streamUrl.startsWith('/') 
-                        ? new URL(streamUrl, url).href 
-                        : baseUrl + streamUrl;
-                }
-                
-                if (streamUrl && streamUrl.startsWith('http')) {
-                    qualities.push({ url: streamUrl, height });
-                }
-            }
-        }
-        
-        return qualities;
-    } catch {
-        return [];
-    }
-}
-
-async function getStreams(tmdbId, mediaType, season, episode, quality = 'auto') {
+async function getStreams(tmdbId, mediaType, season, episode) {
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     const epPadded = targetEpisode.toString().padStart(2, '0');
@@ -156,9 +156,9 @@ async function getStreams(tmdbId, mediaType, season, episode, quality = 'auto') 
 
         let masterUrl;
         if (mediaType === 'movie') {
-            masterUrl = CDN_PROXY + '/' + firstLetter + '/' + slug + '/stream/stream.m3u8?nocache=' + timestamp;
+            masterUrl = `${CDN_PROXY}/${firstLetter}/${slug}/stream/stream.m3u8?nocache=${timestamp}`;
         } else {
-            masterUrl = CDN_PROXY + '/' + firstLetter + '/' + slug + '/' + seasonPadded + '-temporada/' + epPadded + '/stream.m3u8?nocache=' + timestamp;
+            masterUrl = `${CDN_PROXY}/${firstLetter}/${slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
         }
         
         if (!seen.has(masterUrl)) {
@@ -180,7 +180,7 @@ async function getStreams(tmdbId, mediaType, season, episode, quality = 'auto') 
                         url: qual.url,
                         headers: HEADERS,
                         name: `Doramogo - ${qualityName}`,
-                        title: mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode} - ${qualityName}`
+                        title: mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode}`
                     });
                 }
             } else {
@@ -194,10 +194,11 @@ async function getStreams(tmdbId, mediaType, season, episode, quality = 'auto') 
         }
     }
 
-    if (quality !== 'auto' && allStreams.length > 0) {
-        const filtered = allStreams.filter(s => s.name.includes(quality));
-        return filtered.length > 0 ? filtered : allStreams;
-    }
+    allStreams.sort((a, b) => {
+        const qualityA = parseInt(a.name.match(/(\d+)p/)?.[1] || 0);
+        const qualityB = parseInt(b.name.match(/(\d+)p/)?.[1] || 0);
+        return qualityB - qualityA;
+    });
 
     return allStreams;
 }
