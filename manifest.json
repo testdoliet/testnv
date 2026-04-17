@@ -61,7 +61,7 @@
       ]
     },
     {
-    "id": "superflixapi",
+      "id": "superflixapi",
       "name": "SuperFlixAPI",
       "description": "Assista filmes e muito mais através da SuperFlixAPI",
       "version": "1.0.0",
@@ -90,8 +90,39 @@
         "desenhos",
         "dublado"
       ]
+    },
+    {
+      "id": "reidosembeds",
+      "name": "Rei dos Embeds",
+      "description": "O melhor diretório de canais ao vivo. Mais de 150 canais disponíveis.",
+      "version": "1.0.0",
+      "author": "lawlietbr",
+      "supportedTypes": [
+        "live"
+      ],
+      "filename": "providers/reidosembeds.js",
+      "enabled": true,
+      "logo": "https://www.image2url.com/r2/default/images/1776423716151-20e5aa74-a764-4d60-8575-0851d8ab37df.png",
+      "contentLanguage": [
+        "pt-br"
+      ],
+      "formats": [
+        "hls",
+        "m3u8"
+      ],
+      "limited": false,
+      "disabledPlatforms": [],
+      "supportsExternalPlayer": true,
+      "tags": [
+        "canais",
+        "tv",
+        "ao vivo",
+        "esportes",
+        "noticias",
+        "filmes",
+        "séries",
+        "variedades"
+      ]
     }
-  
-  
   ]
 }
