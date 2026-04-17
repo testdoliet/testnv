@@ -180,7 +180,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                         url: qual.url,
                         headers: HEADERS,
                         name: `Doramogo - ${qualityName}`,
-                        title: mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode}`
+                        title: mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode}`,
+                        quality: qual.height,
+                        type: 'hls'
                     });
                 }
             } else {
@@ -188,18 +190,16 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                     url: masterUrl,
                     headers: HEADERS,
                     name: 'Doramogo - Auto',
-                    title: mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode}`
+                    title: mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode}`,
+                    quality: 1080,
+                    type: 'hls'
                 });
             }
         }
     }
 
-    allStreams.sort((a, b) => {
-        const qualityA = parseInt(a.name.match(/(\d+)p/)?.[1] || 0);
-        const qualityB = parseInt(b.name.match(/(\d+)p/)?.[1] || 0);
-        return qualityB - qualityA;
-    });
-
+    allStreams.sort((a, b) => (b.quality || 0) - (a.quality || 0));
+    
     return allStreams;
 }
 
