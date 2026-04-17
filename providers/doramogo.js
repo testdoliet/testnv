@@ -33,32 +33,32 @@ async function extractQualitiesFromM3u8(url) {
     try {
         const response = await fetch(url, { headers: HEADERS });
         const content = await response.text();
-        
+
         const qualities = [];
         const lines = content.split('\n');
         const resolutionPattern = /RESOLUTION=(\d+)x(\d+)/;
-        
+
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const match = resolutionPattern.exec(line);
-            
+
             if (match) {
                 const height = parseInt(match[2]);
                 let streamUrl = lines[i + 1]?.trim();
-                
+
                 if (streamUrl && !streamUrl.startsWith('http')) {
                     const baseUrl = url.substring(0, url.lastIndexOf('/') + 1);
                     streamUrl = streamUrl.startsWith('/') 
                         ? new URL(streamUrl, url).href 
                         : baseUrl + streamUrl;
                 }
-                
+
                 if (streamUrl && streamUrl.startsWith('http')) {
                     qualities.push({ url: streamUrl, height });
                 }
             }
         }
-        
+
         return qualities;
     } catch {
         return [];
@@ -160,7 +160,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         } else {
             masterUrl = `${CDN_PROXY}/${firstLetter}/${slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
         }
-        
+
         if (!seen.has(masterUrl)) {
             seen.add(masterUrl);
             masterUrls.push(masterUrl);
@@ -172,26 +172,15 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     for (const masterUrl of masterUrls) {
         if (await testUrl(masterUrl)) {
             const qualities = await extractQualitiesFromM3u8(masterUrl);
-            
-            if (qualities.length > 0) {
-                for (const qual of qualities) {
-                    const qualityName = `${qual.height}p`;
-                    allStreams.push({
-                        url: qual.url,
-                        headers: HEADERS,
-                        name: `Doramogo - ${qualityName}`,
-                        title: mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode}`,
-                        quality: qual.height,
-                        type: 'hls'
-                    });
-                }
-            } else {
+
+            for (const qual of qualities) {
+                const qualityName = `${qual.height}p`;
                 allStreams.push({
-                    url: masterUrl,
+                    url: qual.url,
                     headers: HEADERS,
-                    name: 'Doramogo - Auto',
+                    name: `Doramogo - ${qualityName}`,
                     title: mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode}`,
-                    quality: 1080,
+                    quality: qual.height,
                     type: 'hls'
                 });
             }
@@ -199,7 +188,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     }
 
     allStreams.sort((a, b) => (b.quality || 0) - (a.quality || 0));
-    
+
     return allStreams;
 }
 
