@@ -1,5 +1,4 @@
-// Nuvio Plugin - StreamFlix (Versão Final)
-// Com detecção real de qualidade via tkhd box
+// Nuvio Plugin - StreamFlix (Com Debugs e Busca Completa)
 
 const BASE_URL = "https://streamflix.live";
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
@@ -225,51 +224,111 @@ async function fetchTMDBTitle(tmdbId, type) {
     }
 }
 
+// ==============================================
+// FUNÇÃO PRINCIPAL COM DEBUGS
+// ==============================================
+
 async function getStreams(tmdbId, mediaType, season, episode) {
+    const debugSteps = [];
+    debugSteps.push(`🚀 INICIO: ${tmdbId}, ${mediaType}, S${season}E${episode}`);
+    
     try {
-        const index = await getCache();
-        
+        // PASSO 1: Buscar TMDB
+        debugSteps.push("PASSO1: Buscando TMDB");
         const tmdbTitle = await fetchTMDBTitle(tmdbId, mediaType);
-        if (!tmdbTitle) return [];
         
+        if (!tmdbTitle) {
+            debugSteps.push(`❌ TMDB não encontrado para ${tmdbId}`);
+            return [{
+                name: `🐛 DEBUG`,
+                title: debugSteps.join(" → "),
+                url: "",
+                quality: 0,
+                headers: {}
+            }];
+        }
+        
+        debugSteps.push(`✅ TMDB: "${tmdbTitle}"`);
+        
+        // PASSO 2: Carregar cache
+        debugSteps.push("PASSO2: Carregando cache");
+        const index = await getCache();
+        debugSteps.push(`Cache carregado: ${Object.keys(index).length} chaves`);
+        
+        // PASSO 3: Limpar título
         const cleanTmdbTitle = cleanTitleForMapping(tmdbTitle);
+        debugSteps.push(`Clean title: "${cleanTmdbTitle}"`);
         
-        // Encontra candidatos
+        // PASSO 4: Buscar candidatos
+        debugSteps.push("PASSO4: Buscando candidatos");
         const candidates = [];
+        
         for (const [key, items] of Object.entries(index)) {
             const similarity = calculateSimilarity(cleanTmdbTitle, key);
             if (similarity >= SIMILARITY_THRESHOLD) {
                 for (const item of items) {
                     if ((mediaType === "movie" && item.type === "movie") ||
                         (mediaType === "tv" && item.type === "series")) {
-                        candidates.push({ ...item, similarity });
+                        candidates.push({ ...item, similarity, matchedKey: key });
                     }
                 }
             }
         }
         
-        if (candidates.length === 0) return [];
+        debugSteps.push(`Candidatos: ${candidates.length}`);
         
-        // Pega os melhores
+        if (candidates.length === 0) {
+            debugSteps.push(`❌ Nenhum candidato (threshold: ${SIMILARITY_THRESHOLD})`);
+            return [{
+                name: `🐛 DEBUG`,
+                title: debugSteps.join(" → "),
+                url: "",
+                quality: 0,
+                headers: {}
+            }];
+        }
+        
+        // PASSO 5: Pegar melhores
         candidates.sort((a, b) => b.similarity - a.similarity);
         const maxSimilarity = candidates[0].similarity;
         const bestCandidates = candidates.filter(c => c.similarity === maxSimilarity);
         
+        debugSteps.push(`Melhores: ${bestCandidates.length} (similaridade: ${maxSimilarity})`);
+        
+        // PASSO 6: Processar cada candidato
         const streams = [];
         
-        for (const candidate of bestCandidates) {
+        for (let idx = 0; idx < bestCandidates.length; idx++) {
+            const candidate = bestCandidates[idx];
+            debugSteps.push(`[${idx + 1}] Processando: ${candidate.originalName.substring(0, 40)}...`);
+            
             let videoUrl = null;
             
             if (candidate.type === "movie") {
                 videoUrl = await getMovieUrl(candidate.id);
+                debugSteps.push(`[${idx + 1}] Movie ID: ${candidate.id}`);
             } else {
                 videoUrl = await getSeriesEpisodeUrl(candidate.id, season || 1, episode || 1);
+                debugSteps.push(`[${idx + 1}] Series ID: ${candidate.id}, S${season}E${episode}`);
             }
             
-            if (!videoUrl) continue;
+            if (!videoUrl) {
+                debugSteps.push(`[${idx + 1}] ❌ URL não obtida`);
+                continue;
+            }
             
-            const quality = await detectRealQuality(videoUrl);
+            debugSteps.push(`[${idx + 1}] ✅ URL obtida, detectando qualidade...`);
             
+            // Detectar qualidade
+            let quality = 720;
+            try {
+                quality = await detectRealQuality(videoUrl);
+                debugSteps.push(`[${idx + 1}] 🎯 Qualidade detectada: ${quality}p`);
+            } catch (e) {
+                debugSteps.push(`[${idx + 1}] ⚠️ Erro na detecção: ${e.message}, usando 720p`);
+            }
+            
+            // Definir áudio
             const isLegendado = candidate.originalName.includes("[L]") || 
                                candidate.originalName.toLowerCase().includes("legendado");
             const audioType = isLegendado ? "Legendado" : "Dublado";
@@ -290,7 +349,18 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             });
         }
         
-        // Remove duplicatas por qualidade
+        if (streams.length === 0) {
+            debugSteps.push(`❌ Nenhum stream obtido`);
+            return [{
+                name: `🐛 DEBUG`,
+                title: debugSteps.join(" → "),
+                url: "",
+                quality: 0,
+                headers: {}
+            }];
+        }
+        
+        // Remover duplicatas por qualidade
         const uniqueStreams = [];
         const seenQualities = new Set();
         for (const stream of streams) {
@@ -300,17 +370,39 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }
         }
         
-        // Ordena por qualidade (maior primeiro)
+        // Ordenar por qualidade (maior primeiro)
         uniqueStreams.sort((a, b) => b.quality - a.quality);
         
-        // Renomeia opções
-        return uniqueStreams.map((stream, idx) => ({
+        // Renomear opções
+        const result = uniqueStreams.map((stream, idx) => ({
             ...stream,
             title: `Opção ${idx + 1}: ${stream.title}`
         }));
         
+        debugSteps.push(`✅ FINAL: ${result.length} streams retornados`);
+        
+        // Se tiver apenas 1 stream, retorna sem debug
+        if (result.length > 0) {
+            return result;
+        }
+        
+        return [{
+            name: `🐛 DEBUG`,
+            title: debugSteps.join(" → "),
+            url: "",
+            quality: 0,
+            headers: {}
+        }];
+        
     } catch (error) {
-        return [];
+        debugSteps.push(`❌ ERRO FATAL: ${error.message}`);
+        return [{
+            name: `🐛 DEBUG ERRO`,
+            title: debugSteps.join(" → "),
+            url: "",
+            quality: 0,
+            headers: {}
+        }];
     }
 }
 
