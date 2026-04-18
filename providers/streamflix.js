@@ -1,9 +1,7 @@
 // Nuvio Plugin - StreamFlix
-// Apenas função load, sem categorias
 
 const BASE_URL = "https://streamflix.live";
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
-const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
 let cache = null;
 let cacheDate = null;
@@ -78,31 +76,10 @@ function cleanTitleForMapping(title) {
     return cleaned.toLowerCase();
 }
 
-function cleanTitleForTMDB(title) {
-    let cleaned = title.trim();
-    cleaned = cleaned.replace(/\s*\[[^\]]+\]\s*/g, " ");
-    cleaned = cleaned.replace(/\s*\[[^\]]+\]\s*$/g, "");
-    cleaned = cleaned.replace(/\b4K\b/gi, "");
-    cleaned = cleaned.replace(/\s*4K\s*/gi, " ");
-    cleaned = cleaned.replace(/\s*\(\d{4}\)\s*/g, " ");
-    cleaned = cleaned.replace(/\s*\(\d{4}\)$/g, "");
-    cleaned = cleaned.replace(/\s*HD\s*/gi, " ");
-    cleaned = cleaned.replace(/\s*FULLHD\s*/gi, " ");
-    cleaned = cleaned.replace(/\s*HDR\s*/gi, " ");
-    cleaned = cleaned.replace(/\s*HYBRID\s*/gi, " ");
-    cleaned = cleaned.replace(/\s+/g, " ").trim();
-    return cleaned;
-}
-
 async function fetchTMDBTitle(tmdbId, type) {
     const url = `https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
     
-    const response = await fetch(url, {
-        headers: {
-            "Authorization": `Bearer ${TMDB_ACCESS_TOKEN}`,
-            "Accept": "application/json"
-        }
-    });
+    const response = await fetch(url);
     
     if (!response.ok) return null;
     
