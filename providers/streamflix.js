@@ -1,4 +1,4 @@
-// Nuvio Plugin - StreamFlix (Com Fallback Garantido e Debug)
+// Nuvio Plugin - StreamFlix (Sempre Retorna Debug Visível)
 
 const BASE_URL = "https://streamflix.live";
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
@@ -228,45 +228,57 @@ async function fetchTMDBTitle(tmdbId, type) {
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL COM FALLBACK GARANTIDO
+// FUNÇÃO PRINCIPAL - SEMPRE RETORNA DEBUG VISÍVEL
 // ==============================================
 
 async function getStreams(tmdbId, mediaType, season, episode) {
-    const debugSteps = [];
-    debugSteps.push(`🚀 INICIO: ${tmdbId}, ${mediaType}, S${season}E${episode}`);
-    
-    // Stream padrão de fallback (sempre disponível)
-    let fallbackUsed = false;
-    let finalVideoUrl = FALLBACK_URL;
+    const debugLog = [];
+    let status = "INICIANDO";
+    let finalUrl = FALLBACK_URL;
     let finalQuality = 720;
-    let finalName = "StreamFlix (Fallback)";
-    let finalTitle = `S${String(season || 1).padStart(2, '0')}E${String(episode || 1).padStart(2, '0')} - 720p`;
-    let finalAudioType = "Dublado";
+    let finalName = "StreamFlix";
+    let finalTitle = "";
     
     try {
-        // PASSO 1: Buscar TMDB
-        debugSteps.push("PASSO1: Buscando TMDB");
+        // ETAPA 1: TMDB
+        debugLog.push("🔍 ETAPA1: Buscando TMDB...");
+        status = "Buscando TMDB";
+        
         const tmdbTitle = await fetchTMDBTitle(tmdbId, mediaType);
         
-        if (tmdbTitle) {
-            debugSteps.push(`✅ TMDB: "${tmdbTitle}"`);
-            finalName = `${tmdbTitle} (Dublado)`;
+        if (!tmdbTitle) {
+            debugLog.push(`❌ TMDB FALHOU: ID ${tmdbId} não encontrado`);
+            status = "ERRO: TMDB não encontrado";
         } else {
-            debugSteps.push(`⚠️ TMDB não encontrado, usando nome padrão`);
-            finalName = `StreamFlix (Dublado)`;
+            debugLog.push(`✅ TMDB OK: "${tmdbTitle}"`);
+            finalName = tmdbTitle;
+            status = "TMDB encontrado";
         }
         
-        // PASSO 2: Carregar cache
-        debugSteps.push("PASSO2: Carregando cache");
-        const index = await getCache();
-        debugSteps.push(`Cache: ${Object.keys(index).length} chaves`);
+        // ETAPA 2: Cache
+        debugLog.push("📂 ETAPA2: Carregando cache...");
+        status = "Carregando cache";
         
-        // PASSO 3: Buscar candidatos
-        if (tmdbTitle) {
+        let index = null;
+        try {
+            index = await getCache();
+            const keyCount = Object.keys(index || {}).length;
+            debugLog.push(`✅ Cache OK: ${keyCount} chaves`);
+            status = `Cache carregado (${keyCount} chaves)`;
+        } catch (e) {
+            debugLog.push(`❌ Cache FALHOU: ${e.message}`);
+            status = `ERRO: Cache - ${e.message}`;
+        }
+        
+        // ETAPA 3: Buscar candidatos
+        debugLog.push("🔎 ETAPA3: Buscando candidatos...");
+        status = "Buscando candidatos";
+        
+        let candidates = [];
+        
+        if (tmdbTitle && index) {
             const cleanTmdbTitle = cleanTitleForMapping(tmdbTitle);
-            debugSteps.push(`Clean title: "${cleanTmdbTitle}"`);
-            
-            const candidates = [];
+            debugLog.push(`Title limpo: "${cleanTmdbTitle}"`);
             
             for (const [key, items] of Object.entries(index)) {
                 const similarity = calculateSimilarity(cleanTmdbTitle, key);
@@ -280,78 +292,95 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 }
             }
             
-            debugSteps.push(`Candidatos: ${candidates.length}`);
+            debugLog.push(`Candidatos: ${candidates.length}`);
+            status = `${candidates.length} candidatos encontrados`;
+        } else {
+            debugLog.push(`⚠️ Pulando busca (sem TMDB ou cache)`);
+        }
+        
+        // ETAPA 4: Processar melhor candidato
+        debugLog.push("⚙️ ETAPA4: Processando melhor candidato...");
+        status = "Processando candidato";
+        
+        let videoUrl = null;
+        
+        if (candidates.length > 0) {
+            candidates.sort((a, b) => b.similarity - a.similarity);
+            const best = candidates[0];
+            debugLog.push(`Melhor: "${best.originalName.substring(0, 50)}" (sim: ${best.similarity.toFixed(3)})`);
             
-            if (candidates.length > 0) {
-                candidates.sort((a, b) => b.similarity - a.similarity);
-                const bestCandidate = candidates[0];
-                debugSteps.push(`Melhor: "${bestCandidate.originalName.substring(0, 40)}" (sim: ${bestCandidate.similarity})`);
-                
-                // Tenta obter URL
-                let videoUrl = null;
-                
-                if (bestCandidate.type === "movie") {
-                    videoUrl = await getMovieUrl(bestCandidate.id);
-                    debugSteps.push(`Movie ID: ${bestCandidate.id}`);
+            try {
+                if (best.type === "movie") {
+                    debugLog.push(`→ Buscando filme ID: ${best.id}`);
+                    videoUrl = await getMovieUrl(best.id);
                 } else {
-                    videoUrl = await getSeriesEpisodeUrl(bestCandidate.id, season || 1, episode || 1);
-                    debugSteps.push(`Series ID: ${bestCandidate.id}`);
+                    debugLog.push(`→ Buscando série ID: ${best.id}, S${season || 1}E${episode || 1}`);
+                    videoUrl = await getSeriesEpisodeUrl(best.id, season || 1, episode || 1);
                 }
                 
                 if (videoUrl) {
-                    debugSteps.push(`✅ URL obtida com sucesso`);
-                    finalVideoUrl = videoUrl;
-                    fallbackUsed = false;
+                    debugLog.push(`✅ URL obtida: ${videoUrl.substring(0, 70)}...`);
+                    finalUrl = videoUrl;
+                    status = "URL obtida com sucesso";
                     
-                    // Detecta qualidade
-                    const detectedQuality = await detectRealQuality(videoUrl);
-                    if (detectedQuality) {
-                        finalQuality = detectedQuality;
-                        debugSteps.push(`🎯 Qualidade: ${finalQuality}p`);
+                    // ETAPA 5: Detectar qualidade
+                    debugLog.push("📊 ETAPA5: Detectando qualidade...");
+                    status = "Detectando qualidade";
+                    
+                    const detected = await detectRealQuality(videoUrl);
+                    if (detected) {
+                        finalQuality = detected;
+                        debugLog.push(`✅ Qualidade: ${finalQuality}p`);
+                        status = `Qualidade ${finalQuality}p detectada`;
                     } else {
-                        debugSteps.push(`⚠️ Falha na detecção, usando 720p`);
+                        debugLog.push(`⚠️ Falha na detecção, usando 720p padrão`);
+                        status = "Falha na detecção (usando 720p)";
                     }
                     
-                    // Define áudio
-                    const isLegendado = bestCandidate.originalName.includes("[L]") || 
-                                       bestCandidate.originalName.toLowerCase().includes("legendado");
-                    finalAudioType = isLegendado ? "Legendado" : "Dublado";
-                    finalName = tmdbTitle ? `${tmdbTitle} (${finalAudioType})` : `StreamFlix (${finalAudioType})`;
+                    // Definir áudio
+                    const isLegendado = best.originalName.includes("[L]") || 
+                                       best.originalName.toLowerCase().includes("legendado");
+                    const audioType = isLegendado ? "Legendado" : "Dublado";
+                    finalName = tmdbTitle ? `${tmdbTitle} (${audioType})` : `StreamFlix (${audioType})`;
                     
-                    const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
-                    const seasonNum = mediaType === "movie" ? 1 : (season || 1);
-                    finalTitle = mediaType === "movie" ? "Filme" : `S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
-                    finalTitle += ` - ${finalQuality}p`;
-                    
-                    debugSteps.push(`✅ Stream encontrado!`);
                 } else {
-                    debugSteps.push(`❌ URL não obtida, usando fallback`);
-                    fallbackUsed = true;
+                    debugLog.push(`❌ URL não retornada`);
+                    status = "ERRO: URL não obtida";
                 }
-            } else {
-                debugSteps.push(`❌ Nenhum candidato, usando fallback`);
-                fallbackUsed = true;
+            } catch (e) {
+                debugLog.push(`❌ ERRO ao buscar URL: ${e.message}`);
+                status = `ERRO: ${e.message.substring(0, 50)}`;
             }
         } else {
-            debugSteps.push(`❌ Sem TMDB, usando fallback`);
-            fallbackUsed = true;
+            debugLog.push(`⚠️ Nenhum candidato válido`);
+            status = "Nenhum candidato encontrado";
+        }
+        
+        // ETAPA FINAL: Montar título com DEBUG
+        const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
+        const seasonNum = mediaType === "movie" ? 1 : (season || 1);
+        const episodeDisplay = mediaType === "movie" ? "Filme" : `S${seasonNum}E${episodeNum}`;
+        
+        // CONSTRÓI O TÍTULO COM DEBUG VISÍVEL
+        finalTitle = `[${status}] ${episodeDisplay} - ${finalQuality}p`;
+        
+        // Adiciona os últimos debugs se houver erro
+        if (status.includes("ERRO") || status.includes("Falha") || candidates.length === 0) {
+            const lastErrors = debugLog.slice(-3).join(" | ");
+            finalTitle += ` | ${lastErrors}`;
         }
         
     } catch (error) {
-        debugSteps.push(`❌ ERRO: ${error.message}`);
-        fallbackUsed = true;
+        debugLog.push(`💥 ERRO FATAL: ${error.message}`);
+        finalTitle = `[ERRO FATAL] S${season || 1}E${episode || 1} - 720p | ${error.message.substring(0, 80)}`;
+        finalName = "StreamFlix (ERRO)";
     }
     
-    // Se usou fallback, adiciona debug no título
-    if (fallbackUsed) {
-        finalTitle = `[FALLBACK] ${finalTitle} | ${debugSteps.join(" → ").substring(0, 100)}`;
-    }
-    
-    // SEMPRE RETORNA UM STREAM
+    // SEMPRE RETORNA UM STREAM COM DEBUG NO TÍTULO
     return [{
         name: finalName,
         title: finalTitle,
-        url: finalVideoUrl,
+        url: finalUrl,
         quality: finalQuality,
         headers: {
             "Referer": BASE_URL,
