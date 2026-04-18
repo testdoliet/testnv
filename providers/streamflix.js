@@ -1,10 +1,7 @@
-// Nuvio Plugin - StreamFlix (Sempre Retorna Debug Visível)
+// Nuvio Plugin - StreamFlix (Debug por Etapas)
 
 const BASE_URL = "https://streamflix.live";
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
-
-// URL de fallback que sabemos que funciona
-const FALLBACK_URL = "http://p2toptz.pro:80/movie/573468/697200/4713.mp4";
 
 let cache = null;
 let cacheDate = null;
@@ -12,57 +9,305 @@ let seriesEpisodesCache = {};
 const CACHE_TTL = 24 * 60 * 60 * 1000;
 const SIMILARITY_THRESHOLD = 0.95;
 
-async function getCache() {
-    if (!cache || Date.now() - cacheDate > CACHE_TTL) {
-        cache = await buildIndex();
-        cacheDate = Date.now();
-    }
-    return cache;
-}
+// ==============================================
+// FUNÇÃO PRINCIPAL COM DEBUG POR ETAPAS
+// ==============================================
 
-async function buildIndex() {
-    const map = {};
+async function getStreams(tmdbId, mediaType, season, episode) {
     
+    // ==========================================
+    // ETAPA 1: TESTAR CONEXÃO COM STREAMFLIX
+    // ==========================================
+    try {
+        const testUrl = `${BASE_URL}/api_proxy.php?action=get_vod_streams`;
+        const testResponse = await fetch(testUrl, { method: 'HEAD' });
+        
+        if (!testResponse.ok) {
+            return [{
+                name: "❌ ETAPA 1 FALHOU",
+                title: `StreamFlix offline: ${testResponse.status}`,
+                url: "",
+                quality: 0,
+                headers: {}
+            }];
+        }
+    } catch (e) {
+        return [{
+            name: "❌ ETAPA 1 FALHOU",
+            title: `Não foi possível conectar: ${e.message}`,
+            url: "",
+            quality: 0,
+            headers: {}
+        }];
+    }
+    
+    // ==========================================
+    // ETAPA 2: BUSCAR TMDB
+    // ==========================================
+    let tmdbTitle = null;
+    try {
+        const tmdbUrl = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
+        const tmdbResponse = await fetch(tmdbUrl);
+        
+        if (!tmdbResponse.ok) {
+            return [{
+                name: "❌ ETAPA 2 FALHOU",
+                title: `TMDB erro ${tmdbResponse.status} para ID ${tmdbId}`,
+                url: "",
+                quality: 0,
+                headers: {}
+            }];
+        }
+        
+        const tmdbData = await tmdbResponse.json();
+        tmdbTitle = mediaType === "movie" ? tmdbData.title : tmdbData.name;
+        
+        if (!tmdbTitle) {
+            return [{
+                name: "❌ ETAPA 2 FALHOU",
+                title: `TMDB não retornou título para ID ${tmdbId}`,
+                url: "",
+                quality: 0,
+                headers: {}
+            }];
+        }
+        
+    } catch (e) {
+        return [{
+            name: "❌ ETAPA 2 FALHOU",
+            title: `TMDB erro: ${e.message}`,
+            url: "",
+            quality: 0,
+            headers: {}
+        }];
+    }
+    
+    // ==========================================
+    // ETAPA 3: CARREGAR CACHE (FILMES)
+    // ==========================================
+    let movies = [];
     try {
         const moviesResponse = await fetch(`${BASE_URL}/api_proxy.php?action=get_vod_streams`);
-        const movies = await moviesResponse.json();
+        movies = await moviesResponse.json();
         
-        if (movies && movies.length) {
-            for (const movie of movies) {
-                const cleanTitle = cleanTitleForMapping(movie.name);
-                if (cleanTitle) {
-                    if (!map[cleanTitle]) map[cleanTitle] = [];
-                    map[cleanTitle].push({
-                        id: movie.stream_id,
-                        type: "movie",
-                        originalName: movie.name
-                    });
-                }
-            }
+        if (!movies || !movies.length) {
+            return [{
+                name: "❌ ETAPA 3 FALHOU",
+                title: `Nenhum filme encontrado no cache`,
+                url: "",
+                quality: 0,
+                headers: {}
+            }];
         }
-    } catch (e) {}
+        
+    } catch (e) {
+        return [{
+            name: "❌ ETAPA 3 FALHOU",
+            title: `Erro ao carregar filmes: ${e.message}`,
+            url: "",
+            quality: 0,
+            headers: {}
+        }];
+    }
     
+    // ==========================================
+    // ETAPA 4: CARREGAR CACHE (SÉRIES)
+    // ==========================================
+    let series = [];
     try {
         const seriesResponse = await fetch(`${BASE_URL}/api_proxy.php?action=get_series`);
-        const series = await seriesResponse.json();
+        series = await seriesResponse.json();
         
-        if (series && series.length) {
-            for (const serie of series) {
-                const cleanTitle = cleanTitleForMapping(serie.name);
-                if (cleanTitle) {
-                    if (!map[cleanTitle]) map[cleanTitle] = [];
-                    map[cleanTitle].push({
-                        id: serie.series_id,
-                        type: "series",
-                        originalName: serie.name
-                    });
+    } catch (e) {
+        return [{
+            name: "❌ ETAPA 4 FALHOU",
+            title: `Erro ao carregar séries: ${e.message}`,
+            url: "",
+            quality: 0,
+            headers: {}
+        }];
+    }
+    
+    // ==========================================
+    // ETAPA 5: LIMPAR TÍTULO PARA BUSCA
+    // ==========================================
+    const cleanTmdbTitle = cleanTitleForMapping(tmdbTitle);
+    
+    // ==========================================
+    // ETAPA 6: BUSCAR CANDIDATOS
+    // ==========================================
+    const candidates = [];
+    
+    // Busca em filmes
+    for (const movie of movies) {
+        const cleanMovieTitle = cleanTitleForMapping(movie.name);
+        const similarity = calculateSimilarity(cleanTmdbTitle, cleanMovieTitle);
+        
+        if (similarity >= SIMILARITY_THRESHOLD && mediaType === "movie") {
+            candidates.push({
+                id: movie.stream_id,
+                type: "movie",
+                originalName: movie.name,
+                similarity: similarity
+            });
+        }
+    }
+    
+    // Busca em séries
+    for (const serie of series) {
+        const cleanSerieTitle = cleanTitleForMapping(serie.name);
+        const similarity = calculateSimilarity(cleanTmdbTitle, cleanSerieTitle);
+        
+        if (similarity >= SIMILARITY_THRESHOLD && mediaType === "tv") {
+            candidates.push({
+                id: serie.series_id,
+                type: "series",
+                originalName: serie.name,
+                similarity: similarity
+            });
+        }
+    }
+    
+    if (candidates.length === 0) {
+        return [{
+            name: "❌ ETAPA 6 FALHOU",
+            title: `Nenhum candidato encontrado para "${tmdbTitle}" (limpo: "${cleanTmdbTitle}")`,
+            url: "",
+            quality: 0,
+            headers: {}
+        }];
+    }
+    
+    // ==========================================
+    // ETAPA 7: ORDENAR CANDIDATOS
+    // ==========================================
+    candidates.sort((a, b) => b.similarity - a.similarity);
+    const bestCandidates = candidates.filter(c => c.similarity === candidates[0].similarity);
+    
+    // ==========================================
+    // ETAPA 8: OBTER URL DO VÍDEO
+    // ==========================================
+    let videoUrl = null;
+    let selectedCandidate = null;
+    
+    for (const candidate of bestCandidates) {
+        try {
+            let url = null;
+            
+            if (candidate.type === "movie") {
+                const streamUrl = `${BASE_URL}/api_proxy.php?action=get_stream_url&type=movie&id=${candidate.id}`;
+                const response = await fetch(streamUrl);
+                const data = await response.json();
+                url = data.stream_url;
+            } else {
+                const streamUrl = `${BASE_URL}/api_proxy.php?action=get_stream_url&type=series&id=${candidate.id}`;
+                const response = await fetch(streamUrl);
+                const data = await response.json();
+                url = data.stream_url;
+            }
+            
+            if (url) {
+                videoUrl = url;
+                selectedCandidate = candidate;
+                break;
+            }
+        } catch (e) {
+            continue;
+        }
+    }
+    
+    if (!videoUrl) {
+        return [{
+            name: "❌ ETAPA 8 FALHOU",
+            title: `Não foi possível obter URL para os candidatos encontrados`,
+            url: "",
+            quality: 0,
+            headers: {}
+        }];
+    }
+    
+    // ==========================================
+    // ETAPA 9: DETECTAR QUALIDADE REAL
+    // ==========================================
+    let quality = 720;
+    let resolution = "";
+    
+    try {
+        const response = await fetch(videoUrl, { 
+            headers: { 
+                "Range": "bytes=0-5242880",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+        });
+        
+        if (response.ok || response.status === 206) {
+            const buffer = await response.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            
+            let found = false;
+            for (let i = 0; i < bytes.length - 20 && !found; i++) {
+                if (bytes[i] === 0x74 && bytes[i+1] === 0x6B && bytes[i+2] === 0x68 && bytes[i+3] === 0x64) {
+                    for (let offset = 48; offset <= 80; offset++) {
+                        if (i + offset + 8 <= bytes.length) {
+                            const widthFixed = (bytes[i+offset] << 24) | (bytes[i+offset+1] << 16) | 
+                                              (bytes[i+offset+2] << 8) | bytes[i+offset+3];
+                            const heightFixed = (bytes[i+offset+4] << 24) | (bytes[i+offset+5] << 16) | 
+                                               (bytes[i+offset+6] << 8) | bytes[i+offset+7];
+                            
+                            const width = Math.round(widthFixed / 65536);
+                            const height = Math.round(heightFixed / 65536);
+                            
+                            if (width >= 640 && width <= 7680 && height >= 360 && height <= 4320) {
+                                const pixels = width * height;
+                                if (pixels >= 6000000) quality = 2160;
+                                else if (pixels >= 1400000) quality = 1080;
+                                else if (pixels >= 700000) quality = 720;
+                                else quality = 480;
+                                
+                                resolution = `${width}x${height}`;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
-    } catch (e) {}
+    } catch (e) {
+        // Mantém qualidade padrão 720
+    }
     
-    return map;
+    // ==========================================
+    // SUCESSO - RETORNA STREAM
+    // ==========================================
+    const isLegendado = selectedCandidate.originalName.includes("[L]") || 
+                       selectedCandidate.originalName.toLowerCase().includes("legendado");
+    const audioType = isLegendado ? "Legendado" : "Dublado";
+    
+    const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
+    const seasonNum = mediaType === "movie" ? 1 : (season || 1);
+    const episodeDisplay = mediaType === "movie" ? "Filme" : `S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
+    
+    let titleDisplay = `${episodeDisplay} - ${quality}p`;
+    if (resolution) {
+        titleDisplay += ` [${resolution}]`;
+    }
+    
+    return [{
+        name: `${tmdbTitle} (${audioType})`,
+        title: titleDisplay,
+        url: videoUrl,
+        quality: quality,
+        headers: {
+            "Referer": BASE_URL,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+    }];
 }
+
+// ==============================================
+// FUNÇÕES AUXILIARES
+// ==============================================
 
 function cleanTitleForMapping(title) {
     let cleaned = title.toLowerCase();
@@ -129,264 +374,6 @@ function calculateSimilarity(str1, str2) {
     }
     
     return Math.min(1.0, jaro + (prefixLength * 0.1 * (1 - jaro)));
-}
-
-async function detectRealQuality(url) {
-    try {
-        const response = await fetch(url, { 
-            headers: { 
-                "Range": "bytes=0-5242880",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-        });
-        
-        if (!response.ok && response.status !== 206) return null;
-        
-        const buffer = await response.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        
-        for (let i = 0; i < bytes.length - 20; i++) {
-            if (bytes[i] === 0x74 && bytes[i+1] === 0x6B && bytes[i+2] === 0x68 && bytes[i+3] === 0x64) {
-                for (let offset = 48; offset <= 80; offset++) {
-                    if (i + offset + 8 <= bytes.length) {
-                        const widthFixed = (bytes[i+offset] << 24) | (bytes[i+offset+1] << 16) | 
-                                          (bytes[i+offset+2] << 8) | bytes[i+offset+3];
-                        const heightFixed = (bytes[i+offset+4] << 24) | (bytes[i+offset+5] << 16) | 
-                                           (bytes[i+offset+6] << 8) | bytes[i+offset+7];
-                        
-                        const width = Math.round(widthFixed / 65536);
-                        const height = Math.round(heightFixed / 65536);
-                        
-                        if (width >= 640 && width <= 7680 && height >= 360 && height <= 4320) {
-                            const pixels = width * height;
-                            if (pixels >= 6000000) return 2160;
-                            if (pixels >= 1400000) return 1080;
-                            if (pixels >= 700000) return 720;
-                            return 480;
-                        }
-                    }
-                }
-            }
-        }
-        
-        return null;
-    } catch (e) {
-        return null;
-    }
-}
-
-async function getMovieUrl(movieId) {
-    const url = `${BASE_URL}/api_proxy.php?action=get_stream_url&type=movie&id=${movieId}`;
-    const response = await fetch(url);
-    const data = await response.json();
-    return data.stream_url;
-}
-
-async function getSeriesEpisodeUrl(seriesId, seasonNum, episodeNum) {
-    const cacheKey = `${seriesId}_${seasonNum}_${episodeNum}`;
-    if (seriesEpisodesCache[cacheKey]) return seriesEpisodesCache[cacheKey];
-    
-    try {
-        const infoUrl = `${BASE_URL}/api_proxy.php?action=get_series_info&series_id=${seriesId}`;
-        const infoResponse = await fetch(infoUrl);
-        const infoData = await infoResponse.json();
-        
-        const episodes = infoData.episodes;
-        if (!episodes) return null;
-        
-        const seasonKey = seasonNum.toString();
-        if (!episodes[seasonKey]) return null;
-        
-        const episodeData = episodes[seasonKey].find(ep => parseInt(ep.episode_num) === parseInt(episodeNum));
-        if (!episodeData) return null;
-        
-        const streamUrl = `${BASE_URL}/api_proxy.php?action=get_stream_url&type=series&id=${episodeData.id}`;
-        const streamResponse = await fetch(streamUrl);
-        const streamData = await streamResponse.json();
-        
-        if (streamData.stream_url) {
-            seriesEpisodesCache[cacheKey] = streamData.stream_url;
-            return streamData.stream_url;
-        }
-        
-        return null;
-    } catch (e) {
-        return null;
-    }
-}
-
-async function fetchTMDBTitle(tmdbId, type) {
-    const url = `https://api.themoviedb.org/3/${type}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
-    try {
-        const response = await fetch(url);
-        if (!response.ok) return null;
-        const data = await response.json();
-        return type === "movie" ? data.title : data.name;
-    } catch (e) {
-        return null;
-    }
-}
-
-// ==============================================
-// FUNÇÃO PRINCIPAL - SEMPRE RETORNA DEBUG VISÍVEL
-// ==============================================
-
-async function getStreams(tmdbId, mediaType, season, episode) {
-    const debugLog = [];
-    let status = "INICIANDO";
-    let finalUrl = FALLBACK_URL;
-    let finalQuality = 720;
-    let finalName = "StreamFlix";
-    let finalTitle = "";
-    
-    try {
-        // ETAPA 1: TMDB
-        debugLog.push("🔍 ETAPA1: Buscando TMDB...");
-        status = "Buscando TMDB";
-        
-        const tmdbTitle = await fetchTMDBTitle(tmdbId, mediaType);
-        
-        if (!tmdbTitle) {
-            debugLog.push(`❌ TMDB FALHOU: ID ${tmdbId} não encontrado`);
-            status = "ERRO: TMDB não encontrado";
-        } else {
-            debugLog.push(`✅ TMDB OK: "${tmdbTitle}"`);
-            finalName = tmdbTitle;
-            status = "TMDB encontrado";
-        }
-        
-        // ETAPA 2: Cache
-        debugLog.push("📂 ETAPA2: Carregando cache...");
-        status = "Carregando cache";
-        
-        let index = null;
-        try {
-            index = await getCache();
-            const keyCount = Object.keys(index || {}).length;
-            debugLog.push(`✅ Cache OK: ${keyCount} chaves`);
-            status = `Cache carregado (${keyCount} chaves)`;
-        } catch (e) {
-            debugLog.push(`❌ Cache FALHOU: ${e.message}`);
-            status = `ERRO: Cache - ${e.message}`;
-        }
-        
-        // ETAPA 3: Buscar candidatos
-        debugLog.push("🔎 ETAPA3: Buscando candidatos...");
-        status = "Buscando candidatos";
-        
-        let candidates = [];
-        
-        if (tmdbTitle && index) {
-            const cleanTmdbTitle = cleanTitleForMapping(tmdbTitle);
-            debugLog.push(`Title limpo: "${cleanTmdbTitle}"`);
-            
-            for (const [key, items] of Object.entries(index)) {
-                const similarity = calculateSimilarity(cleanTmdbTitle, key);
-                if (similarity >= SIMILARITY_THRESHOLD) {
-                    for (const item of items) {
-                        if ((mediaType === "movie" && item.type === "movie") ||
-                            (mediaType === "tv" && item.type === "series")) {
-                            candidates.push({ ...item, similarity });
-                        }
-                    }
-                }
-            }
-            
-            debugLog.push(`Candidatos: ${candidates.length}`);
-            status = `${candidates.length} candidatos encontrados`;
-        } else {
-            debugLog.push(`⚠️ Pulando busca (sem TMDB ou cache)`);
-        }
-        
-        // ETAPA 4: Processar melhor candidato
-        debugLog.push("⚙️ ETAPA4: Processando melhor candidato...");
-        status = "Processando candidato";
-        
-        let videoUrl = null;
-        
-        if (candidates.length > 0) {
-            candidates.sort((a, b) => b.similarity - a.similarity);
-            const best = candidates[0];
-            debugLog.push(`Melhor: "${best.originalName.substring(0, 50)}" (sim: ${best.similarity.toFixed(3)})`);
-            
-            try {
-                if (best.type === "movie") {
-                    debugLog.push(`→ Buscando filme ID: ${best.id}`);
-                    videoUrl = await getMovieUrl(best.id);
-                } else {
-                    debugLog.push(`→ Buscando série ID: ${best.id}, S${season || 1}E${episode || 1}`);
-                    videoUrl = await getSeriesEpisodeUrl(best.id, season || 1, episode || 1);
-                }
-                
-                if (videoUrl) {
-                    debugLog.push(`✅ URL obtida: ${videoUrl.substring(0, 70)}...`);
-                    finalUrl = videoUrl;
-                    status = "URL obtida com sucesso";
-                    
-                    // ETAPA 5: Detectar qualidade
-                    debugLog.push("📊 ETAPA5: Detectando qualidade...");
-                    status = "Detectando qualidade";
-                    
-                    const detected = await detectRealQuality(videoUrl);
-                    if (detected) {
-                        finalQuality = detected;
-                        debugLog.push(`✅ Qualidade: ${finalQuality}p`);
-                        status = `Qualidade ${finalQuality}p detectada`;
-                    } else {
-                        debugLog.push(`⚠️ Falha na detecção, usando 720p padrão`);
-                        status = "Falha na detecção (usando 720p)";
-                    }
-                    
-                    // Definir áudio
-                    const isLegendado = best.originalName.includes("[L]") || 
-                                       best.originalName.toLowerCase().includes("legendado");
-                    const audioType = isLegendado ? "Legendado" : "Dublado";
-                    finalName = tmdbTitle ? `${tmdbTitle} (${audioType})` : `StreamFlix (${audioType})`;
-                    
-                } else {
-                    debugLog.push(`❌ URL não retornada`);
-                    status = "ERRO: URL não obtida";
-                }
-            } catch (e) {
-                debugLog.push(`❌ ERRO ao buscar URL: ${e.message}`);
-                status = `ERRO: ${e.message.substring(0, 50)}`;
-            }
-        } else {
-            debugLog.push(`⚠️ Nenhum candidato válido`);
-            status = "Nenhum candidato encontrado";
-        }
-        
-        // ETAPA FINAL: Montar título com DEBUG
-        const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
-        const seasonNum = mediaType === "movie" ? 1 : (season || 1);
-        const episodeDisplay = mediaType === "movie" ? "Filme" : `S${seasonNum}E${episodeNum}`;
-        
-        // CONSTRÓI O TÍTULO COM DEBUG VISÍVEL
-        finalTitle = `[${status}] ${episodeDisplay} - ${finalQuality}p`;
-        
-        // Adiciona os últimos debugs se houver erro
-        if (status.includes("ERRO") || status.includes("Falha") || candidates.length === 0) {
-            const lastErrors = debugLog.slice(-3).join(" | ");
-            finalTitle += ` | ${lastErrors}`;
-        }
-        
-    } catch (error) {
-        debugLog.push(`💥 ERRO FATAL: ${error.message}`);
-        finalTitle = `[ERRO FATAL] S${season || 1}E${episode || 1} - 720p | ${error.message.substring(0, 80)}`;
-        finalName = "StreamFlix (ERRO)";
-    }
-    
-    // SEMPRE RETORNA UM STREAM COM DEBUG NO TÍTULO
-    return [{
-        name: finalName,
-        title: finalTitle,
-        url: finalUrl,
-        quality: finalQuality,
-        headers: {
-            "Referer": BASE_URL,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-    }];
 }
 
 module.exports = { getStreams };
