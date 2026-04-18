@@ -1,127 +1,38 @@
 {
-  "name": "Liet Nuvio",
+  "name": "StreamFlix Nuvio",
   "version": "1.0.0",
   "scrapers": [
     {
-      "id": "mywallpaper",
-      "name": "My Wallpaper",
-      "description": "CDN brasileiro de animes",
-      "version": "1.0.0",
-      "author": "lawlietbr",
-      "supportedTypes": [
-        "tv"
-      ],
-      "filename": "providers/mywallpaper.js",
-      "enabled": true,
-      "logo": "https://image2url.com/r2/default/images/1773218651086-4a0ea24e-6e2b-4a22-ab18-8cb28d1b6f23.png",
-      "contentLanguage": [
-        "pt-br"
-      ],
-      "formats": [
-        "hls",
-        "m3u8"
-      ],
-      "limited": false,
-      "disabledPlatforms": [],
-      "supportsExternalPlayer": true,
-      "tags": [
-        "anime"
-      ]
-    },
-    {
-      "id": "doramogo",
-      "name": "Doramogo",
-      "description": "Doramogo - Doramas Coreanos Legendados e Dublados",
+      "id": "streamflix",
+      "name": "StreamFlix",
+      "description": "StreamFlix - Filmes e Séries Online em Português | Lançamentos e Clássicos",
       "version": "1.0.0",
       "author": "lawlietbr",
       "supportedTypes": [
         "tv",
         "movie"
       ],
-      "filename": "providers/doramogo.js",
+      "filename": "providers/streamflix.js",
       "enabled": true,
-      "logo": "https://www.doramogo.net/assets/doramogo/images/apple-touch-icon.webp?version=200.50.10",
+      "logo": "https://openclipart.org/image/2400px/svg_to_png/193323/-S.png",
       "contentLanguage": [
         "pt-br"
       ],
       "formats": [
-        "hls",
+        "mp4",
         "m3u8"
       ],
       "limited": false,
       "disabledPlatforms": [],
       "supportsExternalPlayer": true,
       "tags": [
-        "dorama",
-        "k-drama",
-        "coreano",
-        "asiatico",
+        "filmes",
+        "séries",
+        "lançamentos",
+        "dublado",
         "legendado",
-        "dublado"
-      ]
-    },
-    {
-      "id": "superflixapi",
-      "name": "SuperFlixAPI",
-      "description": "Assista filmes e muito mais através da SuperFlixAPI",
-      "version": "1.0.0",
-      "author": "lawlietbr",
-      "supportedTypes": [
-        "tv",
-        "movie"
-      ],
-      "filename": "providers/superflixapi.js",
-      "enabled": true,
-      "logo": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxODAiIGhlaWdodD0iMTgwIiB2aWV3Qm94PSIwIDAgMTgwIDE4MCI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgcng9IjQwIiBmaWxsPSIjZmYwMDAwIi8+PHRleHQgeD0iNTAlIiB5PSI1NCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJBcmlhbCxIZWx2ZXRpY2Esc2Fucy1zZXJpZiIgZm9udC1zaXplPSI2OCIgZm9udC13ZWlnaHQ9IjgwMCIgZmlsbD0iI2ZmZmZmZiI+U0E8L3RleHQ+PC9zdmc+",
-      "contentLanguage": [
-        "pt-br"
-      ],
-      "formats": [
-        "hls",
-        "m3u8"
-      ],
-      "limited": false,
-      "disabledPlatforms": [],
-      "supportsExternalPlayer": true,
-      "tags": [
-        "filmes",
-        "doramas",
-        "séries",
-        "desenhos",
-        "dublado"
-      ]
-    },
-    {
-      "id": "reidosembeds",
-      "name": "Rei dos Embeds",
-      "description": "O melhor diretório de canais ao vivo. Mais de 150 canais disponíveis.",
-      "version": "1.0.0",
-      "author": "lawlietbr",
-      "supportedTypes": [
-        "live"
-      ],
-      "filename": "providers/reidosembeds.js",
-      "enabled": true,
-      "logo": "https://www.image2url.com/r2/default/images/1776423716151-20e5aa74-a764-4d60-8575-0851d8ab37df.png",
-      "contentLanguage": [
-        "pt-br"
-      ],
-      "formats": [
-        "hls",
-        "m3u8"
-      ],
-      "limited": false,
-      "disabledPlatforms": [],
-      "supportsExternalPlayer": true,
-      "tags": [
-        "canais",
-        "tv",
-        "ao vivo",
-        "esportes",
-        "noticias",
-        "filmes",
-        "séries",
-        "variedades"
+        "4k",
+        "nacionais"
       ]
     }
   ]
