@@ -1,7 +1,10 @@
-// Nuvio Plugin - StreamFlix (Com Debugs e Busca Completa)
+// Nuvio Plugin - StreamFlix (Com Fallback Garantido e Debug)
 
 const BASE_URL = "https://streamflix.live";
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
+
+// URL de fallback que sabemos que funciona
+const FALLBACK_URL = "http://p2toptz.pro:80/movie/573468/697200/4713.mp4";
 
 let cache = null;
 let cacheDate = null;
@@ -137,7 +140,7 @@ async function detectRealQuality(url) {
             }
         });
         
-        if (!response.ok && response.status !== 206) return 720;
+        if (!response.ok && response.status !== 206) return null;
         
         const buffer = await response.arrayBuffer();
         const bytes = new Uint8Array(buffer);
@@ -166,9 +169,9 @@ async function detectRealQuality(url) {
             }
         }
         
-        return 720;
+        return null;
     } catch (e) {
-        return 720;
+        return null;
     }
 }
 
@@ -225,185 +228,136 @@ async function fetchTMDBTitle(tmdbId, type) {
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL COM DEBUGS
+// FUNÇÃO PRINCIPAL COM FALLBACK GARANTIDO
 // ==============================================
 
 async function getStreams(tmdbId, mediaType, season, episode) {
     const debugSteps = [];
     debugSteps.push(`🚀 INICIO: ${tmdbId}, ${mediaType}, S${season}E${episode}`);
     
+    // Stream padrão de fallback (sempre disponível)
+    let fallbackUsed = false;
+    let finalVideoUrl = FALLBACK_URL;
+    let finalQuality = 720;
+    let finalName = "StreamFlix (Fallback)";
+    let finalTitle = `S${String(season || 1).padStart(2, '0')}E${String(episode || 1).padStart(2, '0')} - 720p`;
+    let finalAudioType = "Dublado";
+    
     try {
         // PASSO 1: Buscar TMDB
         debugSteps.push("PASSO1: Buscando TMDB");
         const tmdbTitle = await fetchTMDBTitle(tmdbId, mediaType);
         
-        if (!tmdbTitle) {
-            debugSteps.push(`❌ TMDB não encontrado para ${tmdbId}`);
-            return [{
-                name: `🐛 DEBUG`,
-                title: debugSteps.join(" → "),
-                url: "",
-                quality: 0,
-                headers: {}
-            }];
+        if (tmdbTitle) {
+            debugSteps.push(`✅ TMDB: "${tmdbTitle}"`);
+            finalName = `${tmdbTitle} (Dublado)`;
+        } else {
+            debugSteps.push(`⚠️ TMDB não encontrado, usando nome padrão`);
+            finalName = `StreamFlix (Dublado)`;
         }
-        
-        debugSteps.push(`✅ TMDB: "${tmdbTitle}"`);
         
         // PASSO 2: Carregar cache
         debugSteps.push("PASSO2: Carregando cache");
         const index = await getCache();
-        debugSteps.push(`Cache carregado: ${Object.keys(index).length} chaves`);
+        debugSteps.push(`Cache: ${Object.keys(index).length} chaves`);
         
-        // PASSO 3: Limpar título
-        const cleanTmdbTitle = cleanTitleForMapping(tmdbTitle);
-        debugSteps.push(`Clean title: "${cleanTmdbTitle}"`);
-        
-        // PASSO 4: Buscar candidatos
-        debugSteps.push("PASSO4: Buscando candidatos");
-        const candidates = [];
-        
-        for (const [key, items] of Object.entries(index)) {
-            const similarity = calculateSimilarity(cleanTmdbTitle, key);
-            if (similarity >= SIMILARITY_THRESHOLD) {
-                for (const item of items) {
-                    if ((mediaType === "movie" && item.type === "movie") ||
-                        (mediaType === "tv" && item.type === "series")) {
-                        candidates.push({ ...item, similarity, matchedKey: key });
+        // PASSO 3: Buscar candidatos
+        if (tmdbTitle) {
+            const cleanTmdbTitle = cleanTitleForMapping(tmdbTitle);
+            debugSteps.push(`Clean title: "${cleanTmdbTitle}"`);
+            
+            const candidates = [];
+            
+            for (const [key, items] of Object.entries(index)) {
+                const similarity = calculateSimilarity(cleanTmdbTitle, key);
+                if (similarity >= SIMILARITY_THRESHOLD) {
+                    for (const item of items) {
+                        if ((mediaType === "movie" && item.type === "movie") ||
+                            (mediaType === "tv" && item.type === "series")) {
+                            candidates.push({ ...item, similarity });
+                        }
                     }
                 }
             }
-        }
-        
-        debugSteps.push(`Candidatos: ${candidates.length}`);
-        
-        if (candidates.length === 0) {
-            debugSteps.push(`❌ Nenhum candidato (threshold: ${SIMILARITY_THRESHOLD})`);
-            return [{
-                name: `🐛 DEBUG`,
-                title: debugSteps.join(" → "),
-                url: "",
-                quality: 0,
-                headers: {}
-            }];
-        }
-        
-        // PASSO 5: Pegar melhores
-        candidates.sort((a, b) => b.similarity - a.similarity);
-        const maxSimilarity = candidates[0].similarity;
-        const bestCandidates = candidates.filter(c => c.similarity === maxSimilarity);
-        
-        debugSteps.push(`Melhores: ${bestCandidates.length} (similaridade: ${maxSimilarity})`);
-        
-        // PASSO 6: Processar cada candidato
-        const streams = [];
-        
-        for (let idx = 0; idx < bestCandidates.length; idx++) {
-            const candidate = bestCandidates[idx];
-            debugSteps.push(`[${idx + 1}] Processando: ${candidate.originalName.substring(0, 40)}...`);
             
-            let videoUrl = null;
+            debugSteps.push(`Candidatos: ${candidates.length}`);
             
-            if (candidate.type === "movie") {
-                videoUrl = await getMovieUrl(candidate.id);
-                debugSteps.push(`[${idx + 1}] Movie ID: ${candidate.id}`);
-            } else {
-                videoUrl = await getSeriesEpisodeUrl(candidate.id, season || 1, episode || 1);
-                debugSteps.push(`[${idx + 1}] Series ID: ${candidate.id}, S${season}E${episode}`);
-            }
-            
-            if (!videoUrl) {
-                debugSteps.push(`[${idx + 1}] ❌ URL não obtida`);
-                continue;
-            }
-            
-            debugSteps.push(`[${idx + 1}] ✅ URL obtida, detectando qualidade...`);
-            
-            // Detectar qualidade
-            let quality = 720;
-            try {
-                quality = await detectRealQuality(videoUrl);
-                debugSteps.push(`[${idx + 1}] 🎯 Qualidade detectada: ${quality}p`);
-            } catch (e) {
-                debugSteps.push(`[${idx + 1}] ⚠️ Erro na detecção: ${e.message}, usando 720p`);
-            }
-            
-            // Definir áudio
-            const isLegendado = candidate.originalName.includes("[L]") || 
-                               candidate.originalName.toLowerCase().includes("legendado");
-            const audioType = isLegendado ? "Legendado" : "Dublado";
-            
-            const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
-            const seasonNum = mediaType === "movie" ? 1 : (season || 1);
-            const episodeTitle = mediaType === "movie" ? "Filme" : `S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
-            
-            streams.push({
-                name: `${tmdbTitle} (${audioType})`,
-                title: `${episodeTitle} - ${quality}p`,
-                url: videoUrl,
-                quality: quality,
-                headers: {
-                    "Referer": BASE_URL,
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            if (candidates.length > 0) {
+                candidates.sort((a, b) => b.similarity - a.similarity);
+                const bestCandidate = candidates[0];
+                debugSteps.push(`Melhor: "${bestCandidate.originalName.substring(0, 40)}" (sim: ${bestCandidate.similarity})`);
+                
+                // Tenta obter URL
+                let videoUrl = null;
+                
+                if (bestCandidate.type === "movie") {
+                    videoUrl = await getMovieUrl(bestCandidate.id);
+                    debugSteps.push(`Movie ID: ${bestCandidate.id}`);
+                } else {
+                    videoUrl = await getSeriesEpisodeUrl(bestCandidate.id, season || 1, episode || 1);
+                    debugSteps.push(`Series ID: ${bestCandidate.id}`);
                 }
-            });
-        }
-        
-        if (streams.length === 0) {
-            debugSteps.push(`❌ Nenhum stream obtido`);
-            return [{
-                name: `🐛 DEBUG`,
-                title: debugSteps.join(" → "),
-                url: "",
-                quality: 0,
-                headers: {}
-            }];
-        }
-        
-        // Remover duplicatas por qualidade
-        const uniqueStreams = [];
-        const seenQualities = new Set();
-        for (const stream of streams) {
-            if (!seenQualities.has(stream.quality)) {
-                seenQualities.add(stream.quality);
-                uniqueStreams.push(stream);
+                
+                if (videoUrl) {
+                    debugSteps.push(`✅ URL obtida com sucesso`);
+                    finalVideoUrl = videoUrl;
+                    fallbackUsed = false;
+                    
+                    // Detecta qualidade
+                    const detectedQuality = await detectRealQuality(videoUrl);
+                    if (detectedQuality) {
+                        finalQuality = detectedQuality;
+                        debugSteps.push(`🎯 Qualidade: ${finalQuality}p`);
+                    } else {
+                        debugSteps.push(`⚠️ Falha na detecção, usando 720p`);
+                    }
+                    
+                    // Define áudio
+                    const isLegendado = bestCandidate.originalName.includes("[L]") || 
+                                       bestCandidate.originalName.toLowerCase().includes("legendado");
+                    finalAudioType = isLegendado ? "Legendado" : "Dublado";
+                    finalName = tmdbTitle ? `${tmdbTitle} (${finalAudioType})` : `StreamFlix (${finalAudioType})`;
+                    
+                    const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
+                    const seasonNum = mediaType === "movie" ? 1 : (season || 1);
+                    finalTitle = mediaType === "movie" ? "Filme" : `S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`;
+                    finalTitle += ` - ${finalQuality}p`;
+                    
+                    debugSteps.push(`✅ Stream encontrado!`);
+                } else {
+                    debugSteps.push(`❌ URL não obtida, usando fallback`);
+                    fallbackUsed = true;
+                }
+            } else {
+                debugSteps.push(`❌ Nenhum candidato, usando fallback`);
+                fallbackUsed = true;
             }
+        } else {
+            debugSteps.push(`❌ Sem TMDB, usando fallback`);
+            fallbackUsed = true;
         }
-        
-        // Ordenar por qualidade (maior primeiro)
-        uniqueStreams.sort((a, b) => b.quality - a.quality);
-        
-        // Renomear opções
-        const result = uniqueStreams.map((stream, idx) => ({
-            ...stream,
-            title: `Opção ${idx + 1}: ${stream.title}`
-        }));
-        
-        debugSteps.push(`✅ FINAL: ${result.length} streams retornados`);
-        
-        // Se tiver apenas 1 stream, retorna sem debug
-        if (result.length > 0) {
-            return result;
-        }
-        
-        return [{
-            name: `🐛 DEBUG`,
-            title: debugSteps.join(" → "),
-            url: "",
-            quality: 0,
-            headers: {}
-        }];
         
     } catch (error) {
-        debugSteps.push(`❌ ERRO FATAL: ${error.message}`);
-        return [{
-            name: `🐛 DEBUG ERRO`,
-            title: debugSteps.join(" → "),
-            url: "",
-            quality: 0,
-            headers: {}
-        }];
+        debugSteps.push(`❌ ERRO: ${error.message}`);
+        fallbackUsed = true;
     }
+    
+    // Se usou fallback, adiciona debug no título
+    if (fallbackUsed) {
+        finalTitle = `[FALLBACK] ${finalTitle} | ${debugSteps.join(" → ").substring(0, 100)}`;
+    }
+    
+    // SEMPRE RETORNA UM STREAM
+    return [{
+        name: finalName,
+        title: finalTitle,
+        url: finalVideoUrl,
+        quality: finalQuality,
+        headers: {
+            "Referer": BASE_URL,
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+    }];
 }
 
 module.exports = { getStreams };
