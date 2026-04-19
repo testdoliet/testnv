@@ -1,11 +1,18 @@
-// Nuvio Plugin - StreamFlix (Debug com Qualidade 1080)
+// Nuvio Plugin - StreamFlix (Debug com Link Fictício)
 
 const BASE_URL = "https://streamflix.live";
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 
+const HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://streamflix.live/",
+    "Accept": "*/*"
+};
+
 async function getStreams(tmdbId, mediaType, season, episode) {
     
     const debugStreams = [];
+    const fakeUrl = "https://streamflix.live/fake-stream.mp4";
     
     // ==========================================
     // DEBUG 1: Verificar parâmetros recebidos
@@ -13,9 +20,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     debugStreams.push({
         name: "🔍 DEBUG 1 - Parâmetros",
         title: `ID=${tmdbId}, Type=${mediaType}, S=${season}, E=${episode}`,
-        url: "",
+        url: fakeUrl,
         quality: 1080,
-        headers: {}
+        headers: HEADERS
     });
     
     // ==========================================
@@ -33,26 +40,26 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             debugStreams.push({
                 name: "✅ DEBUG 2 - TMDB OK",
                 title: `Título: "${tmdbTitle}"`,
-                url: "",
+                url: fakeUrl,
                 quality: 1080,
-                headers: {}
+                headers: HEADERS
             });
         } else {
             debugStreams.push({
                 name: "❌ DEBUG 2 - TMDB Falhou",
                 title: `Status: ${response.status}`,
-                url: "",
+                url: fakeUrl,
                 quality: 1080,
-                headers: {}
+                headers: HEADERS
             });
         }
     } catch (e) {
         debugStreams.push({
             name: "❌ DEBUG 2 - TMDB Erro",
             title: e.message,
-            url: "",
+            url: fakeUrl,
             quality: 1080,
-            headers: {}
+            headers: HEADERS
         });
     }
     
@@ -67,9 +74,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         debugStreams.push({
             name: "✅ DEBUG 3 - Filmes Carregados",
             title: `Total: ${movies.length} filmes`,
-            url: "",
+            url: fakeUrl,
             quality: 1080,
-            headers: {}
+            headers: HEADERS
         });
         
         // Mostrar primeiros 5 filmes
@@ -77,18 +84,18 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             debugStreams.push({
                 name: `📽️ Filme ${i+1}`,
                 title: movies[i].name.substring(0, 60),
-                url: "",
+                url: fakeUrl,
                 quality: 1080,
-                headers: {}
+                headers: HEADERS
             });
         }
     } catch (e) {
         debugStreams.push({
             name: "❌ DEBUG 3 - Erro Filmes",
             title: e.message,
-            url: "",
+            url: fakeUrl,
             quality: 1080,
-            headers: {}
+            headers: HEADERS
         });
     }
     
@@ -103,9 +110,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         debugStreams.push({
             name: "✅ DEBUG 4 - Séries Carregadas",
             title: `Total: ${series.length} séries`,
-            url: "",
+            url: fakeUrl,
             quality: 1080,
-            headers: {}
+            headers: HEADERS
         });
         
         // Mostrar primeiras 5 séries
@@ -113,18 +120,18 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             debugStreams.push({
                 name: `📺 Série ${i+1}`,
                 title: series[i].name.substring(0, 60),
-                url: "",
+                url: fakeUrl,
                 quality: 1080,
-                headers: {}
+                headers: HEADERS
             });
         }
     } catch (e) {
         debugStreams.push({
             name: "❌ DEBUG 4 - Erro Séries",
             title: e.message,
-            url: "",
+            url: fakeUrl,
             quality: 1080,
-            headers: {}
+            headers: HEADERS
         });
     }
     
@@ -136,9 +143,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         debugStreams.push({
             name: "🔍 DEBUG 5 - Buscando",
             title: `Procurando por: "${searchTerm}"`,
-            url: "",
+            url: fakeUrl,
             quality: 1080,
-            headers: {}
+            headers: HEADERS
         });
         
         let found = null;
@@ -154,9 +161,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 debugStreams.push({
                     name: "✅ Encontrado nos Filmes!",
                     title: `"${movie.name}" (ID: ${movie.stream_id})`,
-                    url: "",
+                    url: fakeUrl,
                     quality: 1080,
-                    headers: {}
+                    headers: HEADERS
                 });
                 break;
             }
@@ -172,9 +179,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                     debugStreams.push({
                         name: "✅ Encontrado nas Séries!",
                         title: `"${serie.name}" (ID: ${serie.series_id})`,
-                        url: "",
+                        url: fakeUrl,
                         quality: 1080,
-                        headers: {}
+                        headers: HEADERS
                     });
                     break;
                 }
@@ -185,9 +192,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             debugStreams.push({
                 name: "❌ Nenhum Match Encontrado",
                 title: `Tente buscar manualmente por: "${tmdbTitle}"`,
-                url: "",
+                url: fakeUrl,
                 quality: 1080,
-                headers: {}
+                headers: HEADERS
             });
         }
         
@@ -210,18 +217,15 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                             title: `${tmdbTitle} - 1080p`,
                             url: videoUrl,
                             quality: 1080,
-                            headers: {
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                                "Referer": BASE_URL
-                            }
+                            headers: HEADERS
                         });
                     } else {
                         debugStreams.push({
                             name: "❌ DEBUG 6 - URL não obtida",
                             title: `Falha ao obter URL para ID ${foundId}`,
-                            url: "",
+                            url: fakeUrl,
                             quality: 1080,
-                            headers: {}
+                            headers: HEADERS
                         });
                     }
                 }
@@ -229,27 +233,13 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 debugStreams.push({
                     name: "❌ DEBUG 6 - Erro URL",
                     title: e.message,
-                    url: "",
+                    url: fakeUrl,
                     quality: 1080,
-                    headers: {}
+                    headers: HEADERS
                 });
             }
         }
     }
-    
-    // ==========================================
-    // STREAM FUNCIONAL (FALLBACK) - SEMPRE NO FINAL
-    // ==========================================
-    debugStreams.push({
-        name: "🎯 STREAM FALLBACK (Sempre funciona)",
-        title: "Usando URL direta - 1080p",
-        url: "http://p2toptz.pro:80/movie/573468/697200/4713.mp4",
-        quality: 1080,
-        headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": BASE_URL
-        }
-    });
     
     return debugStreams;
 }
