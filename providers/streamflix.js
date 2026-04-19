@@ -1,4 +1,4 @@
-// Nuvio Plugin - StreamFlix (Com Debug em Streams)
+// Nuvio Plugin - StreamFlix (Debug com Qualidade Válida)
 
 const BASE_URL = "https://streamflix.live";
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
@@ -14,7 +14,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         name: "🔍 DEBUG 1 - Parâmetros",
         title: `ID=${tmdbId}, Type=${mediaType}, S=${season}, E=${episode}`,
         url: "",
-        quality: 0,
+        quality: 360,
         headers: {}
     });
     
@@ -34,7 +34,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 name: "✅ DEBUG 2 - TMDB OK",
                 title: `Título: "${tmdbTitle}"`,
                 url: "",
-                quality: 0,
+                quality: 360,
                 headers: {}
             });
         } else {
@@ -42,7 +42,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 name: "❌ DEBUG 2 - TMDB Falhou",
                 title: `Status: ${response.status}`,
                 url: "",
-                quality: 0,
+                quality: 360,
                 headers: {}
             });
         }
@@ -51,7 +51,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             name: "❌ DEBUG 2 - TMDB Erro",
             title: e.message,
             url: "",
-            quality: 0,
+            quality: 360,
             headers: {}
         });
     }
@@ -68,7 +68,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             name: "✅ DEBUG 3 - Filmes Carregados",
             title: `Total: ${movies.length} filmes`,
             url: "",
-            quality: 0,
+            quality: 360,
             headers: {}
         });
         
@@ -78,7 +78,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 name: `📽️ Filme ${i+1}`,
                 title: movies[i].name.substring(0, 60),
                 url: "",
-                quality: 0,
+                quality: 360,
                 headers: {}
             });
         }
@@ -87,7 +87,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             name: "❌ DEBUG 3 - Erro Filmes",
             title: e.message,
             url: "",
-            quality: 0,
+            quality: 360,
             headers: {}
         });
     }
@@ -104,7 +104,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             name: "✅ DEBUG 4 - Séries Carregadas",
             title: `Total: ${series.length} séries`,
             url: "",
-            quality: 0,
+            quality: 360,
             headers: {}
         });
         
@@ -114,7 +114,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 name: `📺 Série ${i+1}`,
                 title: series[i].name.substring(0, 60),
                 url: "",
-                quality: 0,
+                quality: 360,
                 headers: {}
             });
         }
@@ -123,7 +123,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             name: "❌ DEBUG 4 - Erro Séries",
             title: e.message,
             url: "",
-            quality: 0,
+            quality: 360,
             headers: {}
         });
     }
@@ -137,21 +137,25 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             name: "🔍 DEBUG 5 - Buscando",
             title: `Procurando por: "${searchTerm}"`,
             url: "",
-            quality: 0,
+            quality: 360,
             headers: {}
         });
         
         let found = null;
+        let foundId = null;
+        let foundType = null;
         
         // Buscar em filmes
         for (const movie of movies) {
             if (movie.name.toLowerCase().includes(searchTerm)) {
-                found = movie;
+                found = movie.name;
+                foundId = movie.stream_id;
+                foundType = "movie";
                 debugStreams.push({
                     name: "✅ Encontrado nos Filmes!",
                     title: `"${movie.name}" (ID: ${movie.stream_id})`,
                     url: "",
-                    quality: 0,
+                    quality: 480,
                     headers: {}
                 });
                 break;
@@ -162,12 +166,14 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         if (!found) {
             for (const serie of series) {
                 if (serie.name.toLowerCase().includes(searchTerm)) {
-                    found = serie;
+                    found = serie.name;
+                    foundId = serie.series_id;
+                    foundType = "series";
                     debugStreams.push({
                         name: "✅ Encontrado nas Séries!",
                         title: `"${serie.name}" (ID: ${serie.series_id})`,
                         url: "",
-                        quality: 0,
+                        quality: 480,
                         headers: {}
                     });
                     break;
@@ -180,14 +186,59 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 name: "❌ Nenhum Match Encontrado",
                 title: `Tente buscar manualmente por: "${tmdbTitle}"`,
                 url: "",
-                quality: 0,
+                quality: 360,
                 headers: {}
             });
+        }
+        
+        // ==========================================
+        // DEBUG 6: Tentar obter URL do vídeo
+        // ==========================================
+        if (foundId) {
+            try {
+                let videoUrl = null;
+                
+                if (foundType === "movie") {
+                    const streamUrl = `${BASE_URL}/api_proxy.php?action=get_stream_url&type=movie&id=${foundId}`;
+                    const streamRes = await fetch(streamUrl);
+                    const streamData = await streamRes.json();
+                    videoUrl = streamData.stream_url;
+                    
+                    if (videoUrl) {
+                        debugStreams.push({
+                            name: "🎯 STREAM ENCONTRADO!",
+                            title: `${tmdbTitle} - 1080p`,
+                            url: videoUrl,
+                            quality: 1080,
+                            headers: {
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                "Referer": BASE_URL
+                            }
+                        });
+                    } else {
+                        debugStreams.push({
+                            name: "❌ DEBUG 6 - URL não obtida",
+                            title: `Falha ao obter URL para ID ${foundId}`,
+                            url: "",
+                            quality: 360,
+                            headers: {}
+                        });
+                    }
+                }
+            } catch (e) {
+                debugStreams.push({
+                    name: "❌ DEBUG 6 - Erro URL",
+                    title: e.message,
+                    url: "",
+                    quality: 360,
+                    headers: {}
+                });
+            }
         }
     }
     
     // ==========================================
-    // STREAM FUNCIONAL (FALLBACK)
+    // STREAM FUNCIONAL (FALLBACK) - SEMPRE NO FINAL
     // ==========================================
     debugStreams.push({
         name: "🎯 STREAM FALLBACK (Sempre funciona)",
@@ -195,7 +246,8 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         url: "http://p2toptz.pro:80/movie/573468/697200/4713.mp4",
         quality: 1080,
         headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": BASE_URL
         }
     });
     
