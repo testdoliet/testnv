@@ -1,5 +1,6 @@
 /**
  * streamflix - Built from src/streamflix/
+ * Debug: Mostra parâmetros recebidos
  */
 
 var __create = Object.create;
@@ -66,27 +67,27 @@ var BASE_URL = "https://streamflix.live";
 var TMDB_API_KEY = "b64d2f3a4212a99d64a7d4485faed7b3";
 var TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
-var HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36",
-  "Accept": "application/json",
-  "Referer": "https://streamflix.live/"
-};
-
-// URL real que funciona
+// URL real que funciona para debug
 var REAL_VIDEO_URL = "https://turbo.fontedosmov.sbs/t/1776772682.c04d541256c935f0cd473e080bf19fdc408c79e345578e5464df5254308d227f/Nacionais/Central%20do%20Brasil.mp4";
 
 // ==============================================
-// FUNÇÃO PRINCIPAL
+// FUNÇÃO PRINCIPAL - DEBUG ETAPA 1
 // ==============================================
 
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
-    console.log(`[StreamFlix] Fetching streams for TMDB ID: ${tmdbId}, Type: ${mediaType}`);
     
-    // Só retorna o stream com URL real
+    console.log(`[StreamFlix] Iniciando - ID: ${tmdbId}, Type: ${mediaType}, S${season}E${episode}`);
+    
+    // ETAPA 1: Apenas retorna os parâmetros recebidos
+    // Isso prova que a função está sendo chamada corretamente
+    
+    const seasonNum = mediaType === "movie" ? 1 : (season || 1);
+    const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
+    
     return [{
-      name: "StreamFlix",
-      title: `${mediaType === "movie" ? "Filme" : `S${season}E${episode}`} - 1080p`,
+      name: "🔍 [DEBUG] StreamFlix - Parâmetros Recebidos",
+      title: `ID: ${tmdbId} | Type: ${mediaType} | S${seasonNum}E${episodeNum}`,
       url: REAL_VIDEO_URL,
       quality: 1080,
       headers: {
@@ -94,6 +95,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         "Referer": "https://turbo.fontedosmov.sbs/"
       }
     }];
+    
   });
 }
 
