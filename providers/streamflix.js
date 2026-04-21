@@ -1,5 +1,5 @@
 /**
- * streamflix - Debug com Resposta da API no URL
+ * streamflix - Debug com Etapa 5 (Buscar URL Real)
  */
 
 var __create = Object.create;
@@ -33,10 +33,6 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
     var fulfilled = (value) => {
@@ -66,7 +62,6 @@ var BASE_URL = "https://streamflix.live";
 var TMDB_API_KEY = "b64d2f3a4212a99d64a7d4485faed7b3";
 var TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
-// Headers mais completos
 var HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
   "Accept": "application/json, text/plain, */*",
@@ -92,9 +87,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
     
     debugStreams.push({
-      name: `🔍 [1/4] ID:${tmdbId} Type:${mediaType} S${seasonNum}E${episodeNum}`,
+      name: `🔍 [1/5] ID:${tmdbId} Type:${mediaType} S${seasonNum}E${episodeNum}`,
       title: "StreamFlix - Parâmetros",
-      url: `debug://params?tmdbId=${tmdbId}&type=${mediaType}&season=${seasonNum}&episode=${episodeNum}`,
+      url: `debug://params?tmdbId=${tmdbId}&type=${mediaType}`,
       quality: 1080,
       headers: HEADERS
     });
@@ -111,19 +106,16 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       if (tmdbResponse.ok) {
         const data = yield tmdbResponse.json();
         tmdbTitle = mediaType === "tv" ? data.name : data.title;
-        const releaseDate = mediaType === "tv" ? data.first_air_date : data.release_date;
-        const year = releaseDate ? parseInt(releaseDate.split("-")[0]) : null;
-        
         debugStreams.push({
-          name: `✅ [2/4] TMDB: ${tmdbTitle} (${year || "?"})`,
+          name: `✅ [2/5] TMDB: ${tmdbTitle}`,
           title: "Título encontrado",
-          url: `debug://tmdb?title=${encodeURIComponent(tmdbTitle)}&year=${year || ""}`,
+          url: `debug://tmdb?title=${encodeURIComponent(tmdbTitle)}`,
           quality: 1080,
           headers: HEADERS
         });
       } else {
         debugStreams.push({
-          name: `❌ [2/4] TMDB Falhou: ${tmdbResponse.status}`,
+          name: `❌ [2/5] TMDB Falhou: ${tmdbResponse.status}`,
           title: "Erro TMDB",
           url: `debug://tmdb-error?status=${tmdbResponse.status}`,
           quality: 1080,
@@ -132,91 +124,269 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       }
     } catch (e) {
       debugStreams.push({
-        name: `❌ [2/4] TMDB Erro: ${e.message.substring(0, 40)}`,
+        name: `❌ [2/5] TMDB Erro: ${e.message.substring(0, 40)}`,
         title: "Exceção TMDB",
-        url: `debug://tmdb-exception?msg=${encodeURIComponent(e.message)}`,
+        url: `debug://tmdb-exception`,
         quality: 1080,
         headers: HEADERS
       });
     }
     
     // ==========================================
-    // ETAPA 3: Buscar FILMES no StreamFlix
+    // ETAPA 3: Buscar Filmes no StreamFlix
     // ==========================================
+    let movies = [];
     try {
       const moviesUrl = `${BASE_URL}/api_proxy.php?action=get_vod_streams`;
       const moviesRes = yield fetch(moviesUrl, { headers: HEADERS });
-      const moviesText = yield moviesRes.text();
       
-      // Tenta formatar a resposta
-      let formattedResponse = moviesText;
-      try {
-        const parsed = JSON.parse(moviesText);
-        formattedResponse = JSON.stringify(parsed, null, 2);
-      } catch (e) {
-        // Mantém o texto original
+      if (moviesRes.ok) {
+        const data = yield moviesRes.json();
+        if (Array.isArray(data)) {
+          movies = data;
+          debugStreams.push({
+            name: `✅ [3/5] Filmes: ${movies.length} filmes carregados`,
+            title: "API de filmes OK",
+            url: `debug://movies?count=${movies.length}`,
+            quality: 1080,
+            headers: HEADERS
+          });
+        } else {
+          debugStreams.push({
+            name: `⚠️ [3/5] Filmes: Resposta não é array`,
+            title: "Formato inesperado",
+            url: `debug://movies-invalid`,
+            quality: 1080,
+            headers: HEADERS
+          });
+        }
+      } else {
+        debugStreams.push({
+          name: `❌ [3/5] Filmes HTTP ${moviesRes.status}`,
+          title: "Erro na requisição",
+          url: `debug://movies-http-error`,
+          quality: 1080,
+          headers: HEADERS
+        });
       }
-      
-      // Limita o tamanho para não estourar
-      const maxLength = 800;
-      const displayText = formattedResponse.length > maxLength 
-        ? formattedResponse.substring(0, maxLength) + "...\n[TRUNCADO]"
-        : formattedResponse;
-      
-      debugStreams.push({
-        name: `📽️ [3/4] FILMES - Status: ${moviesRes.status}`,
-        title: `Resposta da API de filmes (${moviesText.length} bytes)`,
-        url: `data:text/plain,${encodeURIComponent(displayText)}`,
-        quality: 1080,
-        headers: HEADERS
-      });
-      
     } catch (e) {
       debugStreams.push({
-        name: `❌ [3/4] FILMES Erro: ${e.message.substring(0, 40)}`,
-        title: "Erro na requisição",
-        url: `debug://movies-error?msg=${encodeURIComponent(e.message)}`,
+        name: `❌ [3/5] Filmes Erro: ${e.message.substring(0, 40)}`,
+        title: "Exceção",
+        url: `debug://movies-exception`,
         quality: 1080,
         headers: HEADERS
       });
     }
     
     // ==========================================
-    // ETAPA 4: Buscar SÉRIES no StreamFlix
+    // ETAPA 4: Buscar Séries no StreamFlix
     // ==========================================
+    let series = [];
     try {
       const seriesUrl = `${BASE_URL}/api_proxy.php?action=get_series`;
       const seriesRes = yield fetch(seriesUrl, { headers: HEADERS });
-      const seriesText = yield seriesRes.text();
       
-      // Tenta formatar a resposta
-      let formattedResponse = seriesText;
-      try {
-        const parsed = JSON.parse(seriesText);
-        formattedResponse = JSON.stringify(parsed, null, 2);
-      } catch (e) {
-        // Mantém o texto original
+      if (seriesRes.ok) {
+        const data = yield seriesRes.json();
+        if (Array.isArray(data)) {
+          series = data;
+          debugStreams.push({
+            name: `✅ [4/5] Séries: ${series.length} séries carregadas`,
+            title: "API de séries OK",
+            url: `debug://series?count=${series.length}`,
+            quality: 1080,
+            headers: HEADERS
+          });
+        } else {
+          debugStreams.push({
+            name: `⚠️ [4/5] Séries: Resposta não é array`,
+            title: "Formato inesperado",
+            url: `debug://series-invalid`,
+            quality: 1080,
+            headers: HEADERS
+          });
+        }
+      } else {
+        debugStreams.push({
+          name: `❌ [4/5] Séries HTTP ${seriesRes.status}`,
+          title: "Erro na requisição",
+          url: `debug://series-http-error`,
+          quality: 1080,
+          headers: HEADERS
+        });
       }
-      
-      // Limita o tamanho para não estourar
-      const maxLength = 800;
-      const displayText = formattedResponse.length > maxLength 
-        ? formattedResponse.substring(0, maxLength) + "...\n[TRUNCADO]"
-        : formattedResponse;
-      
+    } catch (e) {
       debugStreams.push({
-        name: `📺 [4/4] SÉRIES - Status: ${seriesRes.status}`,
-        title: `Resposta da API de séries (${seriesText.length} bytes)`,
-        url: `data:text/plain,${encodeURIComponent(displayText)}`,
+        name: `❌ [4/5] Séries Erro: ${e.message.substring(0, 40)}`,
+        title: "Exceção",
+        url: `debug://series-exception`,
         quality: 1080,
         headers: HEADERS
       });
+    }
+    
+    // ==========================================
+    // ETAPA 5: Buscar URL Real do Vídeo
+    // ==========================================
+    if (tmdbTitle) {
+      const searchTerm = tmdbTitle.toLowerCase().substring(0, 25);
+      let foundItem = null;
       
-    } catch (e) {
+      // Busca primeiro em filmes
+      for (const movie of movies) {
+        if (movie.name && movie.name.toLowerCase().includes(searchTerm)) {
+          foundItem = movie;
+          debugStreams.push({
+            name: `🎯 [5/5] Match Filme: ${movie.name.substring(0, 40)}`,
+            title: `ID: ${movie.stream_id}`,
+            url: `debug://match-movie?id=${movie.stream_id}`,
+            quality: 1080,
+            headers: HEADERS
+          });
+          break;
+        }
+      }
+      
+      // Se não achou, busca em séries
+      if (!foundItem && mediaType === "tv") {
+        for (const serie of series) {
+          if (serie.name && serie.name.toLowerCase().includes(searchTerm)) {
+            foundItem = serie;
+            debugStreams.push({
+              name: `🎯 [5/5] Match Série: ${serie.name.substring(0, 40)}`,
+              title: `ID: ${serie.series_id}`,
+              url: `debug://match-series?id=${serie.series_id}`,
+              quality: 1080,
+              headers: HEADERS
+            });
+            break;
+          }
+        }
+      }
+      
+      // Se encontrou, tenta obter a URL real
+      if (foundItem) {
+        try {
+          let videoUrl = null;
+          
+          if (foundItem.stream_id) {
+            // É filme
+            const streamUrl = `${BASE_URL}/api_proxy.php?action=get_stream_url&type=movie&id=${foundItem.stream_id}`;
+            const streamRes = yield fetch(streamUrl, { headers: HEADERS });
+            
+            if (streamRes.ok) {
+              const streamData = yield streamRes.json();
+              videoUrl = streamData.stream_url;
+              
+              if (videoUrl) {
+                const quality = getQuality(videoUrl);
+                debugStreams.push({
+                  name: `🎬 [5/5] STREAM ENCONTRADO!`,
+                  title: `${tmdbTitle} - ${quality}p`,
+                  url: videoUrl,
+                  quality: quality,
+                  headers: HEADERS
+                });
+              } else {
+                debugStreams.push({
+                  name: `❌ [5/5] URL vazia para ${foundItem.name.substring(0, 30)}`,
+                  title: "stream_url não retornado",
+                  url: `debug://no-url`,
+                  quality: 1080,
+                  headers: HEADERS
+                });
+              }
+            } else {
+              debugStreams.push({
+                name: `❌ [5/5] HTTP ${streamRes.status} ao buscar stream`,
+                title: `ID: ${foundItem.stream_id || foundItem.series_id}`,
+                url: `debug://stream-http-error`,
+                quality: 1080,
+                headers: HEADERS
+              });
+            }
+          } else if (foundItem.series_id && mediaType === "tv") {
+            // É série - precisa buscar episódio específico
+            const infoUrl = `${BASE_URL}/api_proxy.php?action=get_series_info&series_id=${foundItem.series_id}`;
+            const infoRes = yield fetch(infoUrl, { headers: HEADERS });
+            
+            if (infoRes.ok) {
+              const infoData = yield infoRes.json();
+              const episodes = infoData.episodes;
+              
+              if (episodes && episodes[seasonNum]) {
+                const episodeData = episodes[seasonNum].find(ep => ep.episode_num == episodeNum);
+                if (episodeData) {
+                  const streamUrl = `${BASE_URL}/api_proxy.php?action=get_stream_url&type=series&id=${episodeData.id}`;
+                  const streamRes = yield fetch(streamUrl, { headers: HEADERS });
+                  
+                  if (streamRes.ok) {
+                    const streamData = yield streamRes.json();
+                    videoUrl = streamData.stream_url;
+                    
+                    if (videoUrl) {
+                      const quality = getQuality(videoUrl);
+                      debugStreams.push({
+                        name: `🎬 [5/5] STREAM SÉRIE ENCONTRADO!`,
+                        title: `${tmdbTitle} S${seasonNum}E${episodeNum} - ${quality}p`,
+                        url: videoUrl,
+                        quality: quality,
+                        headers: HEADERS
+                      });
+                    }
+                  }
+                } else {
+                  debugStreams.push({
+                    name: `⚠️ [5/5] Episódio ${episodeNum} não encontrado`,
+                    title: `Temporada ${seasonNum} existe, mas episódio não`,
+                    url: `debug://episode-not-found`,
+                    quality: 1080,
+                    headers: HEADERS
+                  });
+                }
+              } else {
+                debugStreams.push({
+                  name: `⚠️ [5/5] Temporada ${seasonNum} não encontrada`,
+                  title: `Série: ${foundItem.name.substring(0, 30)}`,
+                  url: `debug://season-not-found`,
+                  quality: 1080,
+                  headers: HEADERS
+                });
+              }
+            } else {
+              debugStreams.push({
+                name: `❌ [5/5] Erro ao buscar info da série`,
+                title: `HTTP ${infoRes.status}`,
+                url: `debug://series-info-error`,
+                quality: 1080,
+                headers: HEADERS
+              });
+            }
+          }
+        } catch (e) {
+          debugStreams.push({
+            name: `❌ [5/5] Exceção: ${e.message.substring(0, 40)}`,
+            title: "Erro ao buscar URL",
+            url: `debug://exception`,
+            quality: 1080,
+            headers: HEADERS
+          });
+        }
+      } else {
+        debugStreams.push({
+          name: `⚠️ [5/5] Nenhum match para "${tmdbTitle.substring(0, 30)}"`,
+          title: "Tente buscar manualmente",
+          url: `debug://no-match`,
+          quality: 1080,
+          headers: HEADERS
+        });
+      }
+    } else {
       debugStreams.push({
-        name: `❌ [4/4] SÉRIES Erro: ${e.message.substring(0, 40)}`,
-        title: "Erro na requisição",
-        url: `debug://series-error?msg=${encodeURIComponent(e.message)}`,
+        name: `⚠️ [5/5] Sem TMDB, pulando busca`,
+        title: "TMDB não retornou título",
+        url: `debug://no-tmdb`,
         quality: 1080,
         headers: HEADERS
       });
@@ -224,6 +394,15 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     
     return debugStreams;
   });
+}
+
+function getQuality(url) {
+  if (!url) return 720;
+  const v = url.toLowerCase();
+  if (v.includes("2160") || v.includes("4k")) return 2160;
+  if (v.includes("1080")) return 1080;
+  if (v.includes("720")) return 720;
+  return 720;
 }
 
 module.exports = { getStreams };
