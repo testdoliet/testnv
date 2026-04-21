@@ -1,6 +1,5 @@
 /**
- * streamflix - Built from src/streamflix/
- * Debug: Mostra parâmetros recebidos
+ * streamflix - Debug com Etapa 1 e 2
  */
 
 var __create = Object.create;
@@ -71,22 +70,24 @@ var TMDB_BASE_URL = "https://api.themoviedb.org/3";
 var REAL_VIDEO_URL = "https://turbo.fontedosmov.sbs/t/1776772682.c04d541256c935f0cd473e080bf19fdc408c79e345578e5464df5254308d227f/Nacionais/Central%20do%20Brasil.mp4";
 
 // ==============================================
-// FUNÇÃO PRINCIPAL - DEBUG ETAPA 1
+// FUNÇÃO PRINCIPAL - DEBUG ETAPA 1 e 2
 // ==============================================
 
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
     
-    console.log(`[StreamFlix] Iniciando - ID: ${tmdbId}, Type: ${mediaType}, S${season}E${episode}`);
+    const debugStreams = [];
     
-    // ETAPA 1: Apenas retorna os parâmetros recebidos
-    // Isso prova que a função está sendo chamada corretamente
+    // ==========================================
+    // ETAPA 1: Parâmetros Recebidos
+    // ==========================================
+    console.log(`[StreamFlix] ETAPA 1 - ID: ${tmdbId}, Type: ${mediaType}, S${season}E${episode}`);
     
     const seasonNum = mediaType === "movie" ? 1 : (season || 1);
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
     
-    return [{
-      name: "🔍 [DEBUG] StreamFlix - Parâmetros Recebidos",
+    debugStreams.push({
+      name: "🔍 [ETAPA 1/8] StreamFlix - Parâmetros Recebidos",
       title: `ID: ${tmdbId} | Type: ${mediaType} | S${seasonNum}E${episodeNum}`,
       url: REAL_VIDEO_URL,
       quality: 1080,
@@ -94,8 +95,60 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         "User-Agent": "Mozilla/5.0",
         "Referer": "https://turbo.fontedosmov.sbs/"
       }
-    }];
+    });
     
+    // ==========================================
+    // ETAPA 2: Teste de Conexão com StreamFlix
+    // ==========================================
+    console.log(`[StreamFlix] ETAPA 2 - Testando conexão com ${BASE_URL}`);
+    
+    try {
+      const testUrl = `${BASE_URL}/api_proxy.php?action=get_vod_streams`;
+      const testResponse = yield fetch(testUrl, { 
+        method: "HEAD",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept": "application/json"
+        }
+      });
+      
+      if (testResponse.ok) {
+        debugStreams.push({
+          name: "✅ [ETAPA 2/8] StreamFlix - Conexão OK",
+          title: `Status: ${testResponse.status} | Conectado com sucesso`,
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://turbo.fontedosmov.sbs/"
+          }
+        });
+      } else {
+        debugStreams.push({
+          name: "❌ [ETAPA 2/8] StreamFlix - Conexão Falhou",
+          title: `Status: ${testResponse.status} | Erro ao conectar`,
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://turbo.fontedosmov.sbs/"
+          }
+        });
+      }
+    } catch (e) {
+      debugStreams.push({
+        name: "❌ [ETAPA 2/8] StreamFlix - Erro de Conexão",
+        title: `Erro: ${e.message}`,
+        url: REAL_VIDEO_URL,
+        quality: 1080,
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Referer": "https://turbo.fontedosmov.sbs/"
+        }
+      });
+    }
+    
+    return debugStreams;
   });
 }
 
