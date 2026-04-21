@@ -1,5 +1,5 @@
 /**
- * streamflix - Debug com Etapa 1 e 2
+ * streamflix - Debug com Etapa 1, 2 e 3
  */
 
 var __create = Object.create;
@@ -70,7 +70,7 @@ var TMDB_BASE_URL = "https://api.themoviedb.org/3";
 var REAL_VIDEO_URL = "https://turbo.fontedosmov.sbs/t/1776772682.c04d541256c935f0cd473e080bf19fdc408c79e345578e5464df5254308d227f/Nacionais/Central%20do%20Brasil.mp4";
 
 // ==============================================
-// FUNÇÃO PRINCIPAL - DEBUG ETAPA 1 e 2
+// FUNÇÃO PRINCIPAL - DEBUG ETAPA 1, 2 e 3
 // ==============================================
 
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -87,7 +87,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
     
     debugStreams.push({
-      name: "🔍 [ETAPA 1/8] StreamFlix - Parâmetros Recebidos",
+      name: "🔍 [ETAPA 1/8] Parâmetros Recebidos",
       title: `ID: ${tmdbId} | Type: ${mediaType} | S${seasonNum}E${episodeNum}`,
       url: REAL_VIDEO_URL,
       quality: 1080,
@@ -100,7 +100,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     // ==========================================
     // ETAPA 2: Teste de Conexão com StreamFlix
     // ==========================================
-    console.log(`[StreamFlix] ETAPA 2 - Testando conexão com ${BASE_URL}`);
+    console.log(`[StreamFlix] ETAPA 2 - Testando conexão`);
     
     try {
       const testUrl = `${BASE_URL}/api_proxy.php?action=get_vod_streams`;
@@ -114,8 +114,8 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       
       if (testResponse.ok) {
         debugStreams.push({
-          name: "✅ [ETAPA 2/8] StreamFlix - Conexão OK",
-          title: `Status: ${testResponse.status} | Conectado com sucesso`,
+          name: "✅ [ETAPA 2/8] Conexão StreamFlix OK",
+          title: `Status: ${testResponse.status}`,
           url: REAL_VIDEO_URL,
           quality: 1080,
           headers: {
@@ -125,8 +125,8 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         });
       } else {
         debugStreams.push({
-          name: "❌ [ETAPA 2/8] StreamFlix - Conexão Falhou",
-          title: `Status: ${testResponse.status} | Erro ao conectar`,
+          name: "❌ [ETAPA 2/8] Conexão StreamFlix Falhou",
+          title: `Status: ${testResponse.status}`,
           url: REAL_VIDEO_URL,
           quality: 1080,
           headers: {
@@ -137,7 +137,66 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       }
     } catch (e) {
       debugStreams.push({
-        name: "❌ [ETAPA 2/8] StreamFlix - Erro de Conexão",
+        name: "❌ [ETAPA 2/8] Erro de Conexão",
+        title: `Erro: ${e.message}`,
+        url: REAL_VIDEO_URL,
+        quality: 1080,
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Referer": "https://turbo.fontedosmov.sbs/"
+        }
+      });
+    }
+    
+    // ==========================================
+    // ETAPA 3: Buscar Título no TMDB
+    // ==========================================
+    console.log(`[StreamFlix] ETAPA 3 - Buscando TMDB para ID: ${tmdbId}`);
+    
+    try {
+      const endpoint = mediaType === "tv" ? "tv" : "movie";
+      const tmdbUrl = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
+      console.log(`[StreamFlix] TMDB URL: ${tmdbUrl}`);
+      
+      const tmdbResponse = yield fetch(tmdbUrl, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0"
+        }
+      });
+      
+      if (tmdbResponse.ok) {
+        const data = yield tmdbResponse.json();
+        const title = mediaType === "tv" ? data.name : data.title;
+        const releaseDate = mediaType === "tv" ? data.first_air_date : data.release_date;
+        const year = releaseDate ? parseInt(releaseDate.split("-")[0]) : null;
+        
+        debugStreams.push({
+          name: "✅ [ETAPA 3/8] TMDB Encontrado",
+          title: `"${title}" (${year || "sem ano"}) | ID: ${tmdbId}`,
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://turbo.fontedosmov.sbs/"
+          }
+        });
+      } else {
+        debugStreams.push({
+          name: "❌ [ETAPA 3/8] TMDB Falhou",
+          title: `Status: ${tmdbResponse.status} | ID: ${tmdbId}`,
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://turbo.fontedosmov.sbs/"
+          }
+        });
+      }
+    } catch (e) {
+      debugStreams.push({
+        name: "❌ [ETAPA 3/8] TMDB Erro",
         title: `Erro: ${e.message}`,
         url: REAL_VIDEO_URL,
         quality: 1080,
