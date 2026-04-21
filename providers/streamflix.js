@@ -1,6 +1,6 @@
 /**
- * streamflix - Debug Version
- * Retorna streams de debug para cada etapa
+ * streamflix - Debug Version com URL Real
+ * Todos os streams de debug usam URL que funciona
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -28,6 +28,9 @@ var BASE_URL = "https://streamflix.live";
 var TMDB_API_KEY = "b64d2f3a4212a99d64a7d4485faed7b3";
 var TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
+// URL REAL que você forneceu
+var REAL_VIDEO_URL = "https://turbo.fontedosmov.sbs/t/1776772682.c04d541256c935f0cd473e080bf19fdc408c79e345578e5464df5254308d227f/Nacionais/Central%20do%20Brasil.mp4";
+
 // ==============================================
 // FUNÇÃO PRINCIPAL - RETORNA DEBUGS COMO STREAMS
 // ==============================================
@@ -36,7 +39,6 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
   return __async(this, null, function* () {
     
     const debugStreams = [];
-    const fakeUrl = "https://debug.streamflix.com/fake-stream.m3u8";
     
     // ==========================================
     // STREAM 1 - INÍCIO DA EXECUÇÃO
@@ -44,9 +46,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     debugStreams.push({
       name: "🔍 [DEBUG 1/8] StreamFlix Iniciado",
       title: `Parâmetros: ID=${tmdbId}, Type=${mediaType}, S=${season}, E=${episode}`,
-      url: fakeUrl,
-      quality: 360,
-      headers: { "User-Agent": "Debug/1.0" }
+      url: REAL_VIDEO_URL,
+      quality: 1080,
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
     });
     
     // ==========================================
@@ -59,17 +61,17 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       debugStreams.push({
         name: testResponse.ok ? "✅ [DEBUG 2/8] StreamFlix Conectado" : "❌ [DEBUG 2/8] StreamFlix Offline",
         title: testResponse.ok ? `Status: ${testResponse.status}` : `Erro: ${testResponse.status}`,
-        url: fakeUrl,
-        quality: 360,
-        headers: { "User-Agent": "Debug/1.0" }
+        url: REAL_VIDEO_URL,
+        quality: 1080,
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
       });
     } catch (e) {
       debugStreams.push({
         name: "❌ [DEBUG 2/8] Falha na Conexão",
         title: `Erro: ${e.message}`,
-        url: fakeUrl,
-        quality: 360,
-        headers: { "User-Agent": "Debug/1.0" }
+        url: REAL_VIDEO_URL,
+        quality: 1080,
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
       });
     }
     
@@ -92,26 +94,26 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         debugStreams.push({
           name: "✅ [DEBUG 3/8] TMDB Encontrado",
           title: `"${title}" (${year || "sem ano"})`,
-          url: fakeUrl,
-          quality: 480,
-          headers: { "User-Agent": "Debug/1.0" }
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
         });
       } else {
         debugStreams.push({
           name: "❌ [DEBUG 3/8] TMDB Falhou",
           title: `Status: ${tmdbResponse.status}`,
-          url: fakeUrl,
-          quality: 480,
-          headers: { "User-Agent": "Debug/1.0" }
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
         });
       }
     } catch (e) {
       debugStreams.push({
         name: "❌ [DEBUG 3/8] TMDB Erro",
         title: `Erro: ${e.message}`,
-        url: fakeUrl,
-        quality: 480,
-        headers: { "User-Agent": "Debug/1.0" }
+        url: REAL_VIDEO_URL,
+        quality: 1080,
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
       });
     }
     
@@ -128,9 +130,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         debugStreams.push({
           name: "✅ [DEBUG 4/8] Filmes Carregados",
           title: `Total: ${movies.length} filmes disponíveis`,
-          url: fakeUrl,
-          quality: 480,
-          headers: { "User-Agent": "Debug/1.0" }
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
         });
         
         // Mostra primeiros 3 filmes
@@ -138,27 +140,27 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
           debugStreams.push({
             name: `📽️ Exemplo Filme ${i+1}`,
             title: movies[i].name.substring(0, 60),
-            url: fakeUrl,
-            quality: 480,
-            headers: { "User-Agent": "Debug/1.0" }
+            url: REAL_VIDEO_URL,
+            quality: 1080,
+            headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
           });
         }
       } else {
         debugStreams.push({
           name: "❌ [DEBUG 4/8] Erro Filmes",
           title: `Status: ${moviesRes.status}`,
-          url: fakeUrl,
-          quality: 480,
-          headers: { "User-Agent": "Debug/1.0" }
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
         });
       }
     } catch (e) {
       debugStreams.push({
         name: "❌ [DEBUG 4/8] Erro Filmes",
         title: `Erro: ${e.message}`,
-        url: fakeUrl,
-        quality: 480,
-        headers: { "User-Agent": "Debug/1.0" }
+        url: REAL_VIDEO_URL,
+        quality: 1080,
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
       });
     }
     
@@ -175,9 +177,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         debugStreams.push({
           name: "✅ [DEBUG 5/8] Séries Carregadas",
           title: `Total: ${series.length} séries disponíveis`,
-          url: fakeUrl,
-          quality: 480,
-          headers: { "User-Agent": "Debug/1.0" }
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
         });
         
         // Mostra primeiras 3 séries
@@ -185,27 +187,27 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
           debugStreams.push({
             name: `📺 Exemplo Série ${i+1}`,
             title: series[i].name.substring(0, 60),
-            url: fakeUrl,
-            quality: 480,
-            headers: { "User-Agent": "Debug/1.0" }
+            url: REAL_VIDEO_URL,
+            quality: 1080,
+            headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
           });
         }
       } else {
         debugStreams.push({
           name: "❌ [DEBUG 5/8] Erro Séries",
           title: `Status: ${seriesRes.status}`,
-          url: fakeUrl,
-          quality: 480,
-          headers: { "User-Agent": "Debug/1.0" }
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
         });
       }
     } catch (e) {
       debugStreams.push({
         name: "❌ [DEBUG 5/8] Erro Séries",
         title: `Erro: ${e.message}`,
-        url: fakeUrl,
-        quality: 480,
-        headers: { "User-Agent": "Debug/1.0" }
+        url: REAL_VIDEO_URL,
+        quality: 1080,
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
       });
     }
     
@@ -227,9 +229,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         debugStreams.push({
           name: "✅ [DEBUG 6/8] Correspondência Encontrada",
           title: `"${found.name}" (ID: ${found.stream_id})`,
-          url: fakeUrl,
-          quality: 720,
-          headers: { "User-Agent": "Debug/1.0" }
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
         });
         
         // ==========================================
@@ -270,45 +272,45 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
               debugStreams.push({
                 name: "❌ [DEBUG 7/8] URL não obtida",
                 title: "stream_url veio vazio",
-                url: fakeUrl,
-                quality: 480,
-                headers: { "User-Agent": "Debug/1.0" }
+                url: REAL_VIDEO_URL,
+                quality: 1080,
+                headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
               });
             }
           } else {
             debugStreams.push({
               name: "❌ [DEBUG 7/8] Erro ao obter stream",
               title: `Status: ${streamRes.status}`,
-              url: fakeUrl,
-              quality: 480,
-              headers: { "User-Agent": "Debug/1.0" }
+              url: REAL_VIDEO_URL,
+              quality: 1080,
+              headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
             });
           }
         } catch (e) {
           debugStreams.push({
             name: "❌ [DEBUG 7/8] Exceção",
             title: e.message,
-            url: fakeUrl,
-            quality: 480,
-            headers: { "User-Agent": "Debug/1.0" }
+            url: REAL_VIDEO_URL,
+            quality: 1080,
+            headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
           });
         }
       } else {
         debugStreams.push({
           name: "❌ [DEBUG 6/8] Nenhuma Correspondência",
           title: `Procurando por: "${searchTerm}"`,
-          url: fakeUrl,
-          quality: 480,
-          headers: { "User-Agent": "Debug/1.0" }
+          url: REAL_VIDEO_URL,
+          quality: 1080,
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
         });
       }
     } else {
       debugStreams.push({
         name: "⚠️ [DEBUG 6/8] Pulando busca",
         title: "Sem TMDB ou filmes disponíveis",
-        url: fakeUrl,
-        quality: 480,
-        headers: { "User-Agent": "Debug/1.0" }
+        url: REAL_VIDEO_URL,
+        quality: 1080,
+        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
       });
     }
     
@@ -318,23 +320,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     debugStreams.push({
       name: "🏁 [DEBUG 8/8] Execução Finalizada",
       title: `Total de ${debugStreams.length} streams gerados`,
-      url: fakeUrl,
-      quality: 360,
-      headers: { "User-Agent": "Debug/1.0" }
-    });
-    
-    // ==========================================
-    // STREAM FALLBACK (sempre funciona)
-    // ==========================================
-    debugStreams.push({
-      name: "🎬 STREAM FALLBACK (Sempre disponível)",
-      title: "Teste de qualidade 1080p - URL direta",
-      url: "http://p2toptz.pro:80/movie/573468/697200/4713.mp4",
+      url: REAL_VIDEO_URL,
       quality: 1080,
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": BASE_URL
-      }
+      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
     });
     
     return debugStreams;
