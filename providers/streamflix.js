@@ -1,5 +1,5 @@
 /**
- * streamflix - Debug com Etapa 1, 2, 3 e 4
+ * streamflix - Debug com Resposta da API no URL
  */
 
 var __create = Object.create;
@@ -66,11 +66,18 @@ var BASE_URL = "https://streamflix.live";
 var TMDB_API_KEY = "b64d2f3a4212a99d64a7d4485faed7b3";
 var TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
-// URL real que funciona para debug
-var REAL_VIDEO_URL = "https://turbo.fontedosmov.sbs/t/1776772682.c04d541256c935f0cd473e080bf19fdc408c79e345578e5464df5254308d227f/Nacionais/Central%20do%20Brasil.mp4";
+// Headers mais completos
+var HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Accept-Language": "pt-BR,pt;q=0.9",
+  "Referer": "https://streamflix.live/",
+  "Origin": "https://streamflix.live",
+  "Connection": "keep-alive"
+};
 
 // ==============================================
-// FUNÇÃO PRINCIPAL - DEBUG ETAPA 1, 2, 3 e 4
+// FUNÇÃO PRINCIPAL
 // ==============================================
 
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -85,51 +92,21 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
     
     debugStreams.push({
-      name: `🔍 [1/8] ID:${tmdbId} Type:${mediaType} S${seasonNum}E${episodeNum}`,
-      title: "StreamFlix - Parâmetros recebidos",
-      url: REAL_VIDEO_URL,
+      name: `🔍 [1/4] ID:${tmdbId} Type:${mediaType} S${seasonNum}E${episodeNum}`,
+      title: "StreamFlix - Parâmetros",
+      url: `debug://params?tmdbId=${tmdbId}&type=${mediaType}&season=${seasonNum}&episode=${episodeNum}`,
       quality: 1080,
-      headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
+      headers: HEADERS
     });
     
     // ==========================================
-    // ETAPA 2: Teste de Conexão com StreamFlix
-    // ==========================================
-    try {
-      const testUrl = `${BASE_URL}/api_proxy.php?action=get_vod_streams`;
-      const testResponse = yield fetch(testUrl, { 
-        method: "HEAD",
-        headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" }
-      });
-      
-      debugStreams.push({
-        name: testResponse.ok ? `✅ [2/8] StreamFlix OK Status:${testResponse.status}` : `❌ [2/8] StreamFlix Falhou Status:${testResponse.status}`,
-        title: "Teste de conexão",
-        url: REAL_VIDEO_URL,
-        quality: 1080,
-        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
-      });
-    } catch (e) {
-      debugStreams.push({
-        name: `❌ [2/8] Erro: ${e.message.substring(0, 50)}`,
-        title: "Erro de conexão",
-        url: REAL_VIDEO_URL,
-        quality: 1080,
-        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
-      });
-    }
-    
-    // ==========================================
-    // ETAPA 3: Buscar Título no TMDB
+    // ETAPA 2: Buscar TMDB
     // ==========================================
     let tmdbTitle = null;
     try {
       const endpoint = mediaType === "tv" ? "tv" : "movie";
       const tmdbUrl = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
-      const tmdbResponse = yield fetch(tmdbUrl, {
-        method: "GET",
-        headers: { "Accept": "application/json", "User-Agent": "Mozilla/5.0" }
-      });
+      const tmdbResponse = yield fetch(tmdbUrl, { headers: HEADERS });
       
       if (tmdbResponse.ok) {
         const data = yield tmdbResponse.json();
@@ -138,113 +115,110 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         const year = releaseDate ? parseInt(releaseDate.split("-")[0]) : null;
         
         debugStreams.push({
-          name: `✅ [3/8] TMDB: ${tmdbTitle} (${year || "?"})`,
-          title: "Título encontrado no TMDB",
-          url: REAL_VIDEO_URL,
+          name: `✅ [2/4] TMDB: ${tmdbTitle} (${year || "?"})`,
+          title: "Título encontrado",
+          url: `debug://tmdb?title=${encodeURIComponent(tmdbTitle)}&year=${year || ""}`,
           quality: 1080,
-          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
+          headers: HEADERS
         });
       } else {
         debugStreams.push({
-          name: `❌ [3/8] TMDB Falhou Status:${tmdbResponse.status}`,
-          title: "Erro ao buscar TMDB",
-          url: REAL_VIDEO_URL,
+          name: `❌ [2/4] TMDB Falhou: ${tmdbResponse.status}`,
+          title: "Erro TMDB",
+          url: `debug://tmdb-error?status=${tmdbResponse.status}`,
           quality: 1080,
-          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
+          headers: HEADERS
         });
       }
     } catch (e) {
       debugStreams.push({
-        name: `❌ [3/8] TMDB Erro: ${e.message.substring(0, 40)}`,
-        title: "Exceção no TMDB",
-        url: REAL_VIDEO_URL,
+        name: `❌ [2/4] TMDB Erro: ${e.message.substring(0, 40)}`,
+        title: "Exceção TMDB",
+        url: `debug://tmdb-exception?msg=${encodeURIComponent(e.message)}`,
         quality: 1080,
-        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
+        headers: HEADERS
       });
     }
     
     // ==========================================
-    // ETAPA 4: Buscar Filmes no StreamFlix
+    // ETAPA 3: Buscar FILMES no StreamFlix
     // ==========================================
     try {
       const moviesUrl = `${BASE_URL}/api_proxy.php?action=get_vod_streams`;
-      const moviesRes = yield fetch(moviesUrl, {
-        headers: { "User-Agent": "Mozilla/5.0", "Accept": "application/json" }
+      const moviesRes = yield fetch(moviesUrl, { headers: HEADERS });
+      const moviesText = yield moviesRes.text();
+      
+      // Tenta formatar a resposta
+      let formattedResponse = moviesText;
+      try {
+        const parsed = JSON.parse(moviesText);
+        formattedResponse = JSON.stringify(parsed, null, 2);
+      } catch (e) {
+        // Mantém o texto original
+      }
+      
+      // Limita o tamanho para não estourar
+      const maxLength = 800;
+      const displayText = formattedResponse.length > maxLength 
+        ? formattedResponse.substring(0, maxLength) + "...\n[TRUNCADO]"
+        : formattedResponse;
+      
+      debugStreams.push({
+        name: `📽️ [3/4] FILMES - Status: ${moviesRes.status}`,
+        title: `Resposta da API de filmes (${moviesText.length} bytes)`,
+        url: `data:text/plain,${encodeURIComponent(displayText)}`,
+        quality: 1080,
+        headers: HEADERS
       });
       
-      if (moviesRes.ok) {
-        const movies = yield moviesRes.json();
-        const movieCount = movies ? movies.length : 0;
-        
-        debugStreams.push({
-          name: `✅ [4/8] Filmes: ${movieCount} filmes carregados`,
-          title: "Lista de filmes obtida",
-          url: REAL_VIDEO_URL,
-          quality: 1080,
-          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
-        });
-        
-        // Mostra os primeiros 5 filmes como streams separados
-        if (movies && movies.length > 0) {
-          for (let i = 0; i < Math.min(5, movies.length); i++) {
-            const movie = movies[i];
-            const movieName = movie.name ? movie.name.substring(0, 50) : "Sem nome";
-            debugStreams.push({
-              name: `📽️ Ex${i+1}: ${movieName}`,
-              title: `ID: ${movie.stream_id || "?"}`,
-              url: REAL_VIDEO_URL,
-              quality: 1080,
-              headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
-            });
-          }
-        }
-        
-        // Tenta encontrar correspondência com o título do TMDB
-        if (tmdbTitle) {
-          const searchTerm = tmdbTitle.toLowerCase().substring(0, 20);
-          let found = null;
-          
-          for (const movie of movies) {
-            if (movie.name && movie.name.toLowerCase().includes(searchTerm)) {
-              found = movie;
-              break;
-            }
-          }
-          
-          if (found) {
-            debugStreams.push({
-              name: `🎯 Match: ${found.name.substring(0, 45)}`,
-              title: `ID: ${found.stream_id} - Correspondência encontrada!`,
-              url: REAL_VIDEO_URL,
-              quality: 1080,
-              headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
-            });
-          } else {
-            debugStreams.push({
-              name: `⚠️ Sem match para: ${tmdbTitle.substring(0, 30)}`,
-              title: "Nenhuma correspondência encontrada",
-              url: REAL_VIDEO_URL,
-              quality: 1080,
-              headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
-            });
-          }
-        }
-      } else {
-        debugStreams.push({
-          name: `❌ [4/8] Filmes Falhou Status:${moviesRes.status}`,
-          title: "Erro ao buscar filmes",
-          url: REAL_VIDEO_URL,
-          quality: 1080,
-          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
-        });
-      }
     } catch (e) {
       debugStreams.push({
-        name: `❌ [4/8] Filmes Erro: ${e.message.substring(0, 40)}`,
-        title: "Exceção ao buscar filmes",
-        url: REAL_VIDEO_URL,
+        name: `❌ [3/4] FILMES Erro: ${e.message.substring(0, 40)}`,
+        title: "Erro na requisição",
+        url: `debug://movies-error?msg=${encodeURIComponent(e.message)}`,
         quality: 1080,
-        headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://turbo.fontedosmov.sbs/" }
+        headers: HEADERS
+      });
+    }
+    
+    // ==========================================
+    // ETAPA 4: Buscar SÉRIES no StreamFlix
+    // ==========================================
+    try {
+      const seriesUrl = `${BASE_URL}/api_proxy.php?action=get_series`;
+      const seriesRes = yield fetch(seriesUrl, { headers: HEADERS });
+      const seriesText = yield seriesRes.text();
+      
+      // Tenta formatar a resposta
+      let formattedResponse = seriesText;
+      try {
+        const parsed = JSON.parse(seriesText);
+        formattedResponse = JSON.stringify(parsed, null, 2);
+      } catch (e) {
+        // Mantém o texto original
+      }
+      
+      // Limita o tamanho para não estourar
+      const maxLength = 800;
+      const displayText = formattedResponse.length > maxLength 
+        ? formattedResponse.substring(0, maxLength) + "...\n[TRUNCADO]"
+        : formattedResponse;
+      
+      debugStreams.push({
+        name: `📺 [4/4] SÉRIES - Status: ${seriesRes.status}`,
+        title: `Resposta da API de séries (${seriesText.length} bytes)`,
+        url: `data:text/plain,${encodeURIComponent(displayText)}`,
+        quality: 1080,
+        headers: HEADERS
+      });
+      
+    } catch (e) {
+      debugStreams.push({
+        name: `❌ [4/4] SÉRIES Erro: ${e.message.substring(0, 40)}`,
+        title: "Erro na requisição",
+        url: `debug://series-error?msg=${encodeURIComponent(e.message)}`,
+        quality: 1080,
+        headers: HEADERS
       });
     }
     
