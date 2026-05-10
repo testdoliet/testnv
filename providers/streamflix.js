@@ -1,5 +1,6 @@
 /**
  * Pomfy - Provider com Byse/9n8o
+ * Com conversão automática de IMDb para TMDb
  */
 
 var __create = Object.create;
@@ -63,6 +64,8 @@ var __async = (__this, __arguments, generator) => {
 // ==============================================
 
 const API_POMFY = "https://api.pomfy.stream";
+const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const COOKIE = "SITE_TOTAL_ID=aTYqe6GU65PNmeCXpelwJwAAAMi; __dtsu=104017651574995957BEB724C6373F9E; __cc_id=a44d1e52993b9c2Oaaf40eba24989a06";
 
 const HEADERS = {
@@ -76,6 +79,66 @@ const HEADERS = {
   "Upgrade-Insecure-Requests": "1",
   "Cookie": COOKIE
 };
+
+// ==============================================
+// FUNÇÃO: CONVERTER IMDb PARA TMDb
+// ==============================================
+
+function isImdbId(id) {
+  return typeof id === "string" && id.toLowerCase().startsWith("tt");
+}
+
+function convertToNumberId(id) {
+  if (typeof id === "number") return id;
+  if (typeof id === "string" && !isNaN(parseInt(id))) return parseInt(id);
+  return null;
+}
+
+function convertImdbToTmdb(imdbId, mediaType) {
+  return __async(this, null, function* () {
+    try {
+      const endpoint = mediaType === "tv" ? "find/tv" : "find/movie";
+      const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+      
+      console.log(`[Pomfy] Convertendo IMDb → TMDb: ${imdbId}`);
+      
+      const response = yield fetch(url, {
+        headers: {
+          "User-Agent": HEADERS["User-Agent"],
+          "Accept": "application/json"
+        }
+      });
+      
+      if (!response.ok) {
+        console.log(`[Pomfy] ❌ Conversão falhou: HTTP ${response.status}`);
+        return null;
+      }
+      
+      const data = yield response.json();
+      
+      // Buscar resultados apropriados
+      let results = [];
+      if (mediaType === "tv") {
+        results = data.tv_results || [];
+      } else {
+        results = data.movie_results || [];
+      }
+      
+      if (results && results.length > 0) {
+        const tmdbId = results[0].id;
+        console.log(`[Pomfy] ✅ Convertido: ${imdbId} → ${tmdbId}`);
+        return tmdbId;
+      }
+      
+      console.log(`[Pomfy] ❌ Nenhum resultado encontrado para ${imdbId}`);
+      return null;
+      
+    } catch (error) {
+      console.log(`[Pomfy] ❌ Erro na conversão: ${error.message}`);
+      return null;
+    }
+  });
+}
 
 // ==============================================
 // FUNÇÃO AUXILIAR: GERAR FINGERPRINT
@@ -177,6 +240,56 @@ function decryptPlayback(playback) {
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
     const streams = [];
+    let finalTmdbId = tmdbId;
+    let originalId = tmdbId;
+    
+    // ==========================================
+    // ETAPA 0: Converter IMDb para TMDb se necessário
+    // ==========================================
+    
+    // Verificar se é IMDb ID (começa com tt)
+    if (isImdbId(tmdbId)) {
+      streams.push({
+        name: `🔄 [0/7] IMDb detectado: ${tmdbId}`,
+        title: "Convertendo para TMDb...",
+        url: `debug://converting`,
+        quality: 1080,
+        headers: HEADERS
+      });
+      
+      const convertedId = yield convertImdbToTmdb(tmdbId, mediaType);
+      
+      if (convertedId) {
+        finalTmdbId = convertedId;
+        streams.push({
+          name: `✅ [0/7] Convertido: ${tmdbId} → ${finalTmdbId}`,
+          title: "Conversão bem-sucedida",
+          url: `debug://converted`,
+          quality: 1080,
+          headers: HEADERS
+        });
+      } else {
+        streams.push({
+          name: `❌ [0/7] Falha na conversão de ${tmdbId}`,
+          title: "ID IMDb não encontrado no TMDb",
+          url: `debug://conversion-failed`,
+          quality: 1080,
+          headers: HEADERS
+        });
+        return streams;
+      }
+    } else if (typeof tmdbId === "string" && !isNaN(parseInt(tmdbId))) {
+      // Se for string numérica, converter para número
+      finalTmdbId = parseInt(tmdbId);
+      streams.push({
+        name: `✅ [0/7] ID convertido: ${tmdbId} → ${finalTmdbId}`,
+        title: "String para número",
+        url: `debug://converted-to-number`,
+        quality: 1080,
+        headers: HEADERS
+      });
+    }
+    
     const seasonNum = mediaType === "movie" ? 1 : (season || 1);
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
     
@@ -184,8 +297,8 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     // ETAPA 1: Parâmetros
     // ==========================================
     streams.push({
-      name: `🔍 [1/6] Pomfy: ${mediaType} ${tmdbId} S${seasonNum}E${episodeNum}`,
-      title: "Iniciando busca",
+      name: `🔍 [1/7] Pomfy: ${mediaType} ${finalTmdbId} S${seasonNum}E${episodeNum}`,
+      title: originalId !== finalTmdbId ? `Original: ${originalId}` : "Iniciando busca",
       url: `debug://params`,
       quality: 1080,
       headers: HEADERS
@@ -196,11 +309,11 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       // ETAPA 2: Buscar HTML do Pomfy
       // ==========================================
       const pomfyUrl = mediaType === "movie" 
-        ? `${API_POMFY}/filme/${tmdbId}`
-        : `${API_POMFY}/serie/${tmdbId}/${seasonNum}/${episodeNum}`;
+        ? `${API_POMFY}/filme/${finalTmdbId}`
+        : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
       
       streams.push({
-        name: `📡 [2/6] API Pomfy: ${pomfyUrl}`,
+        name: `📡 [2/7] API Pomfy: ${pomfyUrl}`,
         title: "Aguardando resposta...",
         url: `debug://fetching`,
         quality: 1080,
@@ -211,7 +324,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       
       if (!response.ok) {
         streams.push({
-          name: `❌ [2/6] HTTP ${response.status}`,
+          name: `❌ [2/7] HTTP ${response.status}`,
           title: "Falha na requisição",
           url: `debug://error`,
           quality: 1080,
@@ -223,7 +336,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const html = yield response.text();
       
       streams.push({
-        name: `✅ [2/6] HTML recebido: ${html.length} bytes`,
+        name: `✅ [2/7] HTML recebido: ${html.length} bytes`,
         title: "Página carregada",
         url: `debug://html-loaded`,
         quality: 1080,
@@ -236,7 +349,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
       if (!linkMatch) {
         streams.push({
-          name: `❌ [3/6] Link não encontrado no HTML`,
+          name: `❌ [3/7] Link não encontrado no HTML`,
           title: "Conteúdo indisponível no Pomfy",
           url: `debug://no-link`,
           quality: 1080,
@@ -249,7 +362,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const byseId = byseUrl.split("/").pop();
       
       streams.push({
-        name: `✅ [3/6] Byse ID: ${byseId}`,
+        name: `✅ [3/7] Byse ID: ${byseId}`,
         title: byseUrl,
         url: `debug://byse-id`,
         quality: 1080,
@@ -262,7 +375,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
       
       streams.push({
-        name: `📡 [4/6] Buscando detalhes...`,
+        name: `📡 [4/7] Buscando detalhes...`,
         title: detailsUrl,
         url: `debug://details`,
         quality: 1080,
@@ -282,7 +395,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       
       if (!detailsResponse.ok) {
         streams.push({
-          name: `❌ [4/6] Detalhes falhou: ${detailsResponse.status}`,
+          name: `❌ [4/7] Detalhes falhou: ${detailsResponse.status}`,
           title: "Não foi possível obter embed URL",
           url: `debug://details-error`,
           quality: 1080,
@@ -296,7 +409,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const embedDomain = new URL(embedUrl).origin;
       
       streams.push({
-        name: `✅ [4/6] Embed URL obtida`,
+        name: `✅ [4/7] Embed URL obtida`,
         title: embedUrl,
         url: `debug://embed-url`,
         quality: 1080,
@@ -309,7 +422,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const challengeUrl = `${embedDomain}/api/videos/access/challenge`;
       
       streams.push({
-        name: `🔐 [5/6] Access challenge...`,
+        name: `🔐 [5/7] Access challenge...`,
         title: "Resolvendo desafio",
         url: `debug://challenge`,
         quality: 1080,
@@ -328,7 +441,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       
       if (!challengeResponse.ok) {
         streams.push({
-          name: `❌ [5/6] Challenge falhou: ${challengeResponse.status}`,
+          name: `❌ [5/7] Challenge falhou: ${challengeResponse.status}`,
           title: "Não foi possível resolver o desafio",
           url: `debug://challenge-error`,
           quality: 1080,
@@ -340,7 +453,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const challengeData = yield challengeResponse.json();
       
       streams.push({
-        name: `✅ [5/6] Challenge resolvido`,
+        name: `✅ [5/7] Challenge resolvido`,
         title: `ID: ${challengeData.challenge_id}`,
         url: `debug://challenge-ok`,
         quality: 1080,
@@ -354,7 +467,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const fingerprint = generateFingerprint();
       
       streams.push({
-        name: `🎬 [6/6] Solicitando playback...`,
+        name: `🎬 [6/7] Solicitando playback...`,
         title: "Aguardando link do vídeo",
         url: `debug://playback`,
         quality: 1080,
@@ -378,7 +491,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       
       if (!playbackResponse.ok) {
         streams.push({
-          name: `❌ [6/6] Playback falhou: ${playbackResponse.status}`,
+          name: `❌ [6/7] Playback falhou: ${playbackResponse.status}`,
           title: "Não foi obter o link",
           url: `debug://playback-error`,
           quality: 1080,
@@ -392,7 +505,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       
       if (!m3u8Url) {
         streams.push({
-          name: `❌ [6/6] Falha na descriptografia`,
+          name: `❌ [6/7] Falha na descriptografia`,
           title: "Não foi possível decodificar o payload",
           url: `debug://decrypt-error`,
           quality: 1080,
@@ -405,7 +518,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       // SUCESSO! Adicionar stream final
       // ==========================================
       const title = mediaType === "movie"
-        ? `Filme ${tmdbId}`
+        ? `Filme ${finalTmdbId}`
         : `T${seasonNum.toString().padStart(2, "0")}E${episodeNum.toString().padStart(2, "0")}`;
       
       streams.push({
