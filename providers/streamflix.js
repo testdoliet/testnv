@@ -263,9 +263,15 @@ function bytesToString(bytes) {
 // ==============================================
 // FUNÇÃO: DESCRIPTOGRAFAR PLAYBACK (AES-GCM)
 // ==============================================
+// ==============================================
+// FUNÇÃO: DESCRIPTOGRAFAR PLAYBACK (AES-GCM CORRIGIDA)
+// ==============================================
 
 function decryptPlayback(playback) {
   try {
+    console.log("[decrypt] Iniciando descriptografia...");
+    
+    // Usar o primeiro conjunto (iv, key_parts, payload)
     const iv = base64ToBytes(playback.iv);
     const key1 = base64ToBytes(playback.key_parts[0]);
     const key2 = base64ToBytes(playback.key_parts[1]);
@@ -284,9 +290,30 @@ function decryptPlayback(playback) {
     const authTag = encryptedData.slice(-16);
     const ciphertext = encryptedData.slice(0, -16);
     
+    console.log("[decrypt] Decifrando AES-256-GCM...");
     const plaintext = aes256GcmDecrypt(ciphertext, key, iv, authTag);
-    const decrypted = bytesToString(plaintext);
-    const videoData = JSON.parse(decrypted);
+    
+    // Converter bytes para string de forma segura
+    let decrypted = '';
+    for (let i = 0; i < plaintext.length; i++) {
+      const charCode = plaintext[i];
+      // Pular caracteres de controle (exceto tab, newline, carriage return)
+      if (charCode >= 32 || charCode === 9 || charCode === 10 || charCode === 13) {
+        decrypted += String.fromCharCode(charCode);
+      }
+    }
+    
+    console.log("[decrypt] Payload decifrado (primeiros 200 chars):", decrypted.substring(0, 200));
+    
+    // Tentar parsear o JSON
+    let videoData;
+    try {
+      videoData = JSON.parse(decrypted);
+    } catch (jsonError) {
+      // Se falhar, tentar limpar caracteres problemáticos
+      const cleaned = decrypted.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+      videoData = JSON.parse(cleaned);
+    }
     
     let m3u8Url = null;
     if (videoData.sources && videoData.sources.length > 0) {
@@ -304,6 +331,7 @@ function decryptPlayback(playback) {
     
     return { success: false, error: "Nenhuma URL encontrada" };
   } catch (error) {
+    console.error("[decrypt] Erro:", error);
     return { success: false, error: error.message };
   }
 }
