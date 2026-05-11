@@ -46,7 +46,7 @@ const HEADERS = {
 };
 
 // ==============================================
-// IMPLEMENTAÇÃO MANUAL AES-256-GCM (QUE FUNCIONA)
+// IMPLEMENTAÇÃO MANUAL AES-256-GCM
 // ==============================================
 
 const SBOX = [
@@ -170,7 +170,8 @@ class AES256GCM_Manual {
         if (counter[j] !== 0) break;
       }
     }
-    return new TextDecoder().decode(plaintext);
+    // Usa Buffer para Node.js (ambiente Nuvio)
+    return Buffer.from(plaintext).toString('utf8');
   }
 }
 
@@ -183,12 +184,7 @@ function base64ToBytes(base64) {
   while (clean.length % 4) {
     clean += '=';
   }
-  const binaryString = atob(clean);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
+  return new Uint8Array(Buffer.from(clean, 'base64'));
 }
 
 // ==============================================
@@ -210,7 +206,7 @@ function decryptPlayback(playback) {
     while (payload.length % 4) {
       payload += '=';
     }
-    const encryptedData = base64ToBytes(payload);
+    const encryptedData = new Uint8Array(Buffer.from(payload, 'base64'));
     
     const ciphertext = encryptedData.slice(0, -16);
     
@@ -291,7 +287,7 @@ function generateFingerprint() {
     exp: timestamp + 600
   };
   
-  const token = btoa(JSON.stringify(payload));
+  const token = Buffer.from(JSON.stringify(payload)).toString('base64');
   
   return {
     token: token,
