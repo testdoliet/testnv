@@ -253,6 +253,18 @@ function base64ToBytes(base64) {
 }
 
 // ==============================================
+// FUNÇÃO: CONVERTER BYTES PARA STRING (sem TextDecoder)
+// ==============================================
+
+function bytesToString(bytes) {
+  let result = '';
+  for (let i = 0; i < bytes.length; i++) {
+    result += String.fromCharCode(bytes[i]);
+  }
+  return result;
+}
+
+// ==============================================
 // FUNÇÃO: DESCRIPTOGRAFAR PLAYBACK (AES-GCM)
 // ==============================================
 
@@ -277,7 +289,7 @@ function decryptPlayback(playback) {
     const ciphertext = encryptedData.slice(0, -16);
     
     const plaintext = aes256GcmDecrypt(ciphertext, key, iv, authTag);
-    const decrypted = new TextDecoder().decode(plaintext);
+    const decrypted = bytesToString(plaintext);
     const videoData = JSON.parse(decrypted);
     
     let m3u8Url = null;
@@ -391,10 +403,6 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     let finalTmdbId = tmdbId;
     let originalId = tmdbId;
     
-    // ==========================================
-    // ETAPA 0: Converter IMDb para TMDb
-    // ==========================================
-    
     if (isImdbId(tmdbId)) {
       streams.push({
         name: `🔄 [0/6] IMDb detectado: ${tmdbId}`,
@@ -427,21 +435,11 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       }
     } else if (typeof tmdbId === "string" && !isNaN(parseInt(tmdbId))) {
       finalTmdbId = parseInt(tmdbId);
-      streams.push({
-        name: `✅ [0/6] ID convertido: ${tmdbId} → ${finalTmdbId}`,
-        title: "String para número",
-        url: `debug://converted-to-number?from=${tmdbId}&to=${finalTmdbId}`,
-        quality: 1080,
-        headers: HEADERS
-      });
     }
     
     const seasonNum = mediaType === "movie" ? 1 : (season || 1);
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
     
-    // ==========================================
-    // ETAPA 1: Parâmetros
-    // ==========================================
     streams.push({
       name: `🔍 [1/6] Pomfy: ${mediaType} ${finalTmdbId} S${seasonNum}E${episodeNum}`,
       title: originalId !== finalTmdbId ? `Original: ${originalId}` : "Iniciando busca",
@@ -451,9 +449,6 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     });
     
     try {
-      // ==========================================
-      // ETAPA 2: Buscar HTML do Pomfy
-      // ==========================================
       const pomfyUrl = mediaType === "movie" 
         ? `${API_POMFY}/filme/${finalTmdbId}`
         : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
@@ -467,42 +462,19 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       });
       
       const response = yield fetch(pomfyUrl, { headers: HEADERS });
-      
-      if (!response.ok) {
-        streams.push({
-          name: `❌ [2/6] HTTP ${response.status}`,
-          title: `Falha na requisição: ${response.status} ${response.statusText}`,
-          url: `debug://error?status=${response.status}&url=${encodeURIComponent(pomfyUrl)}`,
-          quality: 1080,
-          headers: HEADERS
-        });
-        return streams;
-      }
+      if (!response.ok) return streams;
       
       const html = yield response.text();
-      
       streams.push({
         name: `✅ [2/6] HTML recebido: ${html.length} bytes`,
-        title: "Página carregada com sucesso",
+        title: "Página carregada",
         url: `debug://html-loaded?size=${html.length}`,
         quality: 1080,
         headers: HEADERS
       });
       
-      // ==========================================
-      // ETAPA 3: Extrair link do vídeo
-      // ==========================================
       const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
-      if (!linkMatch) {
-        streams.push({
-          name: `❌ [3/6] Link não encontrado`,
-          title: "Conteúdo indisponível no Pomfy",
-          url: `debug://no-link?tmdbId=${finalTmdbId}&season=${seasonNum}&episode=${episodeNum}`,
-          quality: 1080,
-          headers: HEADERS
-        });
-        return streams;
-      }
+      if (!linkMatch) return streams;
       
       const byseUrl = linkMatch[1];
       const byseId = byseUrl.split("/").pop();
@@ -515,19 +487,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         headers: HEADERS
       });
       
-      // ==========================================
-      // ETAPA 4: Buscar detalhes do vídeo
-      // ==========================================
       const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
-      
-      streams.push({
-        name: `📡 [4/6] Buscando detalhes...`,
-        title: detailsUrl,
-        url: `debug://details`,
-        quality: 1080,
-        headers: HEADERS
-      });
-      
       const detailsResponse = yield fetch(detailsUrl, {
         headers: {
           "accept": "*/*",
@@ -539,16 +499,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         }
       });
       
-      if (!detailsResponse.ok) {
-        streams.push({
-          name: `❌ [4/6] Detalhes falhou: ${detailsResponse.status}`,
-          title: `HTTP ${detailsResponse.status}`,
-          url: `debug://details-error?status=${detailsResponse.status}`,
-          quality: 1080,
-          headers: HEADERS
-        });
-        return streams;
-      }
+      if (!detailsResponse.ok) return streams;
       
       const detailsData = yield detailsResponse.json();
       const embedUrl = detailsData.embed_frame_url;
@@ -562,90 +513,30 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         headers: HEADERS
       });
       
-      // ==========================================
-      // ETAPA 5: Access challenge
-      // ==========================================
-      const challengeUrl = `${embedDomain}/api/videos/access/challenge`;
-      
-      streams.push({
-        name: `🔐 [5/6] Access challenge...`,
-        title: "Resolvendo desafio",
-        url: `debug://challenge`,
-        quality: 1080,
-        headers: HEADERS
-      });
-      
-      const challengeResponse = yield fetch(challengeUrl, {
+      // Access challenge
+      yield fetch(`${embedDomain}/api/videos/access/challenge`, {
         method: "POST",
         headers: {
           "accept": "*/*",
-          "accept-language": "pt-BR,pt;q=0.9",
           "origin": embedDomain,
           "referer": embedUrl,
           "user-agent": HEADERS["User-Agent"]
         }
       });
       
-      if (!challengeResponse.ok) {
-        streams.push({
-          name: `❌ [5/6] Challenge falhou: ${challengeResponse.status}`,
-          title: `HTTP ${challengeResponse.status}`,
-          url: `debug://challenge-error?status=${challengeResponse.status}`,
-          quality: 1080,
-          headers: HEADERS
-        });
-        return streams;
-      }
-      
-      const challengeData = yield challengeResponse.json();
-      
-      streams.push({
-        name: `✅ [5/6] Challenge resolvido`,
-        title: `ID: ${challengeData.challenge_id}`,
-        url: `debug://challenge-ok`,
-        quality: 1080,
-        headers: HEADERS
-      });
-      
-      // ==========================================
-      // ETAPA 6: Requisitar playback
-      // ==========================================
-      const playbackUrl = `${embedDomain}/api/videos/${byseId}/embed/playback`;
-      const fingerprint = generateFingerprint();
-      
-      streams.push({
-        name: `🎬 [6/6] Solicitando playback...`,
-        title: "Aguardando link",
-        url: `debug://playback`,
-        quality: 1080,
-        headers: HEADERS
-      });
-      
-      const playbackResponse = yield fetch(playbackUrl, {
+      // Playback
+      const playbackResponse = yield fetch(`${embedDomain}/api/videos/${byseId}/embed/playback`, {
         method: "POST",
         headers: {
-          "accept": "*/*",
-          "accept-language": "pt-BR,pt;q=0.9",
           "content-type": "application/json",
           "origin": embedDomain,
           "referer": embedUrl,
-          "x-embed-origin": "api.pomfy.stream",
-          "x-embed-parent": byseUrl,
           "user-agent": HEADERS["User-Agent"]
         },
-        body: JSON.stringify({ fingerprint: fingerprint })
+        body: JSON.stringify({ fingerprint: generateFingerprint() })
       });
       
-      if (!playbackResponse.ok) {
-        streams.push({
-          name: `❌ [6/6] Playback falhou: ${playbackResponse.status}`,
-          title: `HTTP ${playbackResponse.status}`,
-          url: `debug://playback-error?status=${playbackResponse.status}`,
-          quality: 1080,
-          headers: HEADERS
-        });
-        return streams;
-      }
+      if (!playbackResponse.ok) return streams;
       
       const playbackData = yield playbackResponse.json();
       const decryptResult = decryptPlayback(playbackData.playback);
@@ -661,11 +552,6 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         return streams;
       }
       
-      const m3u8Url = decryptResult.url;
-      
-      // ==========================================
-      // SUCESSO!
-      // ==========================================
       const title = mediaType === "movie"
         ? `Filme ${finalTmdbId}`
         : `T${seasonNum.toString().padStart(2, "0")}E${episodeNum.toString().padStart(2, "0")}`;
@@ -673,20 +559,19 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       streams.push({
         name: `🎉 SUCESSO! Pomfy - 1080p`,
         title: title,
-        url: m3u8Url,
+        url: decryptResult.url,
         quality: 1080,
         headers: {
           "User-Agent": HEADERS["User-Agent"],
           "Referer": embedUrl,
-          "Accept": "*/*",
-          "Accept-Language": "pt-BR,pt;q=0.9"
+          "Accept": "*/*"
         }
       });
       
     } catch (error) {
       streams.push({
-        name: `❌ ERRO: ${error.name || "Exception"}`,
-        title: error.message,
+        name: `❌ ERRO: ${error.message}`,
+        title: "",
         url: `debug://exception?error=${encodeURIComponent(error.message)}`,
         quality: 1080,
         headers: HEADERS
