@@ -802,3 +802,4 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     return streams;
   });
 }
+module.exports = { getStreams };
