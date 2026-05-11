@@ -1,6 +1,6 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Com AES-GCM completo em JavaScript puro
+ * Com AES-GCM completo em JavaScript puro (SEM Buffer)
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -44,6 +44,94 @@ const HEADERS = {
   "Upgrade-Insecure-Requests": "1",
   "Cookie": COOKIE
 };
+
+// ==============================================
+// UTF-8 MANUAL
+// ==============================================
+
+function utf8Encode(str) {
+  const bytes = [];
+  for (let i = 0; i < str.length; i++) {
+    let code = str.charCodeAt(i);
+    if (code < 0x80) {
+      bytes.push(code);
+    } else if (code < 0x800) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code < 0xd800 || code >= 0xe000) {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    } else {
+      i++;
+      code = 0x10000 + (((code & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff));
+      bytes.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 0x3f), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    }
+  }
+  return bytes;
+}
+
+function utf8Decode(bytes) {
+  let str = "";
+  let i = 0;
+  while (i < bytes.length) {
+    let b1 = bytes[i++];
+    if (b1 < 0x80) {
+      str += String.fromCharCode(b1);
+    } else if (b1 >= 0xc0 && b1 < 0xe0) {
+      let b2 = bytes[i++];
+      str += String.fromCharCode(((b1 & 0x1f) << 6) | (b2 & 0x3f));
+    } else if (b1 >= 0xe0 && b1 < 0xf0) {
+      let b2 = bytes[i++];
+      let b3 = bytes[i++];
+      str += String.fromCharCode(((b1 & 0x0f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f));
+    } else {
+      let b2 = bytes[i++];
+      let b3 = bytes[i++];
+      let b4 = bytes[i++];
+      let code = ((b1 & 0x07) << 18) | ((b2 & 0x3f) << 12) | ((b3 & 0x3f) << 6) | (b4 & 0x3f);
+      str += String.fromCharCode(0xd800 + ((code - 0x10000) >> 10), 0xdc00 + ((code - 0x10000) & 0x3ff));
+    }
+  }
+  return str;
+}
+
+// ==============================================
+// BASE64 MANUAL
+// ==============================================
+
+const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function base64ToBytes(base64) {
+  let clean = base64.replace(/-/g, '+').replace(/_/g, '/');
+  while (clean.length % 4) {
+    clean += '=';
+  }
+  
+  const bytes = [];
+  for (let i = 0; i < clean.length; i += 4) {
+    const chunk = clean.substr(i, 4);
+    const n = (BASE64_CHARS.indexOf(chunk[0]) << 18) |
+              (BASE64_CHARS.indexOf(chunk[1]) << 12) |
+              (BASE64_CHARS.indexOf(chunk[2]) << 6) |
+              BASE64_CHARS.indexOf(chunk[3]);
+    
+    bytes.push((n >> 16) & 0xff);
+    if (chunk[2] !== '=') bytes.push((n >> 8) & 0xff);
+    if (chunk[3] !== '=') bytes.push(n & 0xff);
+  }
+  
+  return new Uint8Array(bytes);
+}
+
+function bytesToBase64(bytes) {
+  let result = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);
+    result += BASE64_CHARS[(n >> 18) & 0x3f];
+    result += BASE64_CHARS[(n >> 12) & 0x3f];
+    result += (i + 1 < bytes.length) ? BASE64_CHARS[(n >> 6) & 0x3f] : '=';
+    result += (i + 2 < bytes.length) ? BASE64_CHARS[n & 0x3f] : '=';
+  }
+  return result;
+}
 
 // ==============================================
 // IMPLEMENTAÇÃO MANUAL AES-256-GCM
@@ -170,21 +258,8 @@ class AES256GCM_Manual {
         if (counter[j] !== 0) break;
       }
     }
-    // Usa Buffer para Node.js (ambiente Nuvio)
-    return Buffer.from(plaintext).toString('utf8');
+    return utf8Decode(plaintext);
   }
-}
-
-// ==============================================
-// BASE64
-// ==============================================
-
-function base64ToBytes(base64) {
-  let clean = base64.replace(/-/g, '+').replace(/_/g, '/');
-  while (clean.length % 4) {
-    clean += '=';
-  }
-  return new Uint8Array(Buffer.from(clean, 'base64'));
 }
 
 // ==============================================
@@ -206,7 +281,7 @@ function decryptPlayback(playback) {
     while (payload.length % 4) {
       payload += '=';
     }
-    const encryptedData = new Uint8Array(Buffer.from(payload, 'base64'));
+    const encryptedData = base64ToBytes(payload);
     
     const ciphertext = encryptedData.slice(0, -16);
     
@@ -287,7 +362,9 @@ function generateFingerprint() {
     exp: timestamp + 600
   };
   
-  const token = Buffer.from(JSON.stringify(payload)).toString('base64');
+  const jsonStr = JSON.stringify(payload);
+  const jsonBytes = utf8Encode(jsonStr);
+  const token = bytesToBase64(new Uint8Array(jsonBytes));
   
   return {
     token: token,
