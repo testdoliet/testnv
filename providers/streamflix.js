@@ -225,9 +225,16 @@ function cipher(state, w, nr, inv = false) {
 }
 
 function aes256GcmDecrypt(ciphertext, key, iv, authTag) {
+  // Expandir a chave
   const w = keyExpansion(key);
-  const nr = 14;
-  const plaintext = cipher(ciphertext, w, nr, true);
+  const nr = 14; // AES-256 tem 14 rounds
+  
+  // Fazer uma cópia do ciphertext
+  const state = new Uint8Array(ciphertext);
+  
+  // Decifrar
+  const plaintext = cipher(state, w, nr, true);
+  
   return plaintext;
 }
 
@@ -261,17 +268,12 @@ function bytesToString(bytes) {
 }
 
 // ==============================================
-// FUNÇÃO: DESCRIPTOGRAFAR PLAYBACK (AES-GCM)
-// ==============================================
-// ==============================================
 // FUNÇÃO: DESCRIPTOGRAFAR PLAYBACK (AES-GCM CORRIGIDA)
 // ==============================================
 
 function decryptPlayback(playback) {
   try {
-    console.log("[decrypt] Iniciando descriptografia...");
-    
-    // Usar o primeiro conjunto (iv, key_parts, payload)
+    // Decodificar base64 URL-safe
     const iv = base64ToBytes(playback.iv);
     const key1 = base64ToBytes(playback.key_parts[0]);
     const key2 = base64ToBytes(playback.key_parts[1]);
@@ -287,51 +289,67 @@ function decryptPlayback(playback) {
     }
     const encryptedData = base64ToBytes(payload);
     
+    // Separar auth tag (últimos 16 bytes) e ciphertext
     const authTag = encryptedData.slice(-16);
     const ciphertext = encryptedData.slice(0, -16);
     
-    console.log("[decrypt] Decifrando AES-256-GCM...");
+    // Descriptografar
     const plaintext = aes256GcmDecrypt(ciphertext, key, iv, authTag);
     
-    // Converter bytes para string de forma segura
+    // Converter para string pulando caracteres nulos e inválidos
     let decrypted = '';
     for (let i = 0; i < plaintext.length; i++) {
-      const charCode = plaintext[i];
-      // Pular caracteres de controle (exceto tab, newline, carriage return)
-      if (charCode >= 32 || charCode === 9 || charCode === 10 || charCode === 13) {
-        decrypted += String.fromCharCode(charCode);
+      const code = plaintext[i];
+      // Pular caracteres nulos e de controle
+      if (code !== 0 && code !== 8 && code !== 11 && code !== 12 && code !== 14 && code !== 15) {
+        if ((code >= 32 && code <= 126) || code === 9 || code === 10 || code === 13 || code >= 128) {
+          decrypted += String.fromCharCode(code);
+        }
       }
     }
     
-    console.log("[decrypt] Payload decifrado (primeiros 200 chars):", decrypted.substring(0, 200));
+    // Tentar extrair JSON (procura por { ... })
+    let jsonStart = decrypted.indexOf('{');
+    let jsonEnd = decrypted.lastIndexOf('}');
     
-    // Tentar parsear o JSON
-    let videoData;
-    try {
-      videoData = JSON.parse(decrypted);
-    } catch (jsonError) {
-      // Se falhar, tentar limpar caracteres problemáticos
-      const cleaned = decrypted.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
-      videoData = JSON.parse(cleaned);
+    if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+      const jsonStr = decrypted.substring(jsonStart, jsonEnd + 1);
+      
+      // Tentar parsear
+      let videoData;
+      try {
+        videoData = JSON.parse(jsonStr);
+      } catch (e) {
+        // Se falhar, tentar limpar caracteres problemáticos
+        const cleaned = jsonStr.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+        videoData = JSON.parse(cleaned);
+      }
+      
+      // Extrair URL do m3u8
+      let m3u8Url = null;
+      if (videoData.sources && videoData.sources.length > 0) {
+        m3u8Url = videoData.sources[0].url;
+      } else if (videoData.url) {
+        m3u8Url = videoData.url;
+      } else if (videoData.data && videoData.data.sources) {
+        m3u8Url = videoData.data.sources[0].url;
+      }
+      
+      if (m3u8Url) {
+        m3u8Url = m3u8Url.replace(/\\u0026/g, '&');
+        return { success: true, url: m3u8Url };
+      }
     }
     
-    let m3u8Url = null;
-    if (videoData.sources && videoData.sources.length > 0) {
-      m3u8Url = videoData.sources[0].url;
-    } else if (videoData.url) {
-      m3u8Url = videoData.url;
-    } else if (videoData.data && videoData.data.sources) {
-      m3u8Url = videoData.data.sources[0].url;
+    // Se não encontrar JSON, tentar extrair diretamente do texto
+    const urlMatch = decrypted.match(/(https?:\/\/[^\s"']+\.m3u8[^\s"']*)/i);
+    if (urlMatch) {
+      return { success: true, url: urlMatch[1].replace(/\\u0026/g, '&') };
     }
     
-    if (m3u8Url) {
-      m3u8Url = m3u8Url.replace(/\\u0026/g, '&');
-      return { success: true, url: m3u8Url };
-    }
+    return { success: false, error: "Nenhuma URL encontrada no payload decifrado" };
     
-    return { success: false, error: "Nenhuma URL encontrada" };
   } catch (error) {
-    console.error("[decrypt] Erro:", error);
     return { success: false, error: error.message };
   }
 }
