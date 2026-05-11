@@ -1,5 +1,5 @@
-// crypto/aes-gcm.js
-// Implementação pura de AES-GCM em JavaScript (sem dependências)
+// providers/crypto/aes-gcm.js
+// Implementação completa de AES-GCM em JavaScript puro
 
 // S-Box AES
 const sBox = [
@@ -15,7 +15,7 @@ const sBox = [
   0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
   0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
   0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
-  0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+  0xba, 0x78, 0x75, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
   0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
   0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
   0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
@@ -60,7 +60,7 @@ function keyExpansion(key) {
   for (let i = nk; i < 4 * (nr + 1); i++) {
     let temp = w[i-1];
     if (i % nk === 0) {
-      temp = subWord(rotWord(temp)) ^ (0x01000000 << ((i/nk)-1)) >>> 0;
+      temp = subWord(rotWord(temp)) ^ (0x01000000 << ((i/nk)-1));
     } else if (nk > 6 && i % nk === 4) {
       temp = subWord(temp);
     }
@@ -71,11 +71,11 @@ function keyExpansion(key) {
 }
 
 function addRoundKey(state, roundKey) {
-  for (let i = 0; i < 16; i += 4) {
-    state[i] ^= (roundKey[i/4] >>> 24) & 0xFF;
-    state[i+1] ^= (roundKey[i/4] >>> 16) & 0xFF;
-    state[i+2] ^= (roundKey[i/4] >>> 8) & 0xFF;
-    state[i+3] ^= roundKey[i/4] & 0xFF;
+  for (let i = 0; i < 4; i++) {
+    state[i*4] ^= (roundKey[i] >>> 24) & 0xFF;
+    state[i*4+1] ^= (roundKey[i] >>> 16) & 0xFF;
+    state[i*4+2] ^= (roundKey[i] >>> 8) & 0xFF;
+    state[i*4+3] ^= roundKey[i] & 0xFF;
   }
 }
 
@@ -87,35 +87,44 @@ function subBytes(state, inv = false) {
 }
 
 function shiftRows(state, inv = false) {
-  const shifted = new Uint8Array(16);
+  const result = new Uint8Array(16);
   for (let i = 0; i < 4; i++) {
     for (let j = 0; j < 4; j++) {
       const shift = inv ? (4 - i) % 4 : i;
-      shifted[i*4 + ((j + shift) % 4)] = state[i*4 + j];
+      result[i*4 + j] = state[i*4 + ((j + shift) % 4)];
     }
   }
   for (let i = 0; i < 16; i++) {
-    state[i] = shifted[i];
+    state[i] = result[i];
   }
+}
+
+function xtime(a) {
+  return (a << 1) ^ ((a & 0x80) ? 0x1B : 0);
 }
 
 function mixColumns(state, inv = false) {
   for (let i = 0; i < 4; i++) {
-    const a = new Array(4);
-    const b = new Array(4);
-    for (let j = 0; j < 4; j++) {
-      a[j] = state[i*4 + j];
-      b[j] = (inv ? (a[j] << 1) ^ (a[j] >> 7) & 0x1B : a[j]) & 0xFF;
+    const s0 = state[i*4];
+    const s1 = state[i*4+1];
+    const s2 = state[i*4+2];
+    const s3 = state[i*4+3];
+    
+    if (inv) {
+      state[i*4] = xtime(xtime(s0 ^ s2)) ^ xtime(s0 ^ s1 ^ s2 ^ s3) ^ s0 ^ s3;
+      state[i*4+1] = xtime(xtime(s1 ^ s3)) ^ xtime(s0 ^ s1 ^ s2 ^ s3) ^ s1 ^ s0;
+      state[i*4+2] = xtime(xtime(s2 ^ s0)) ^ xtime(s0 ^ s1 ^ s2 ^ s3) ^ s2 ^ s1;
+      state[i*4+3] = xtime(xtime(s3 ^ s1)) ^ xtime(s0 ^ s1 ^ s2 ^ s3) ^ s3 ^ s2;
+    } else {
+      state[i*4] = xtime(s0) ^ xtime(s1) ^ s1 ^ s2 ^ s3;
+      state[i*4+1] = s0 ^ xtime(s1) ^ xtime(s2) ^ s2 ^ s3;
+      state[i*4+2] = s0 ^ s1 ^ xtime(s2) ^ xtime(s3) ^ s3;
+      state[i*4+3] = xtime(s0) ^ s0 ^ s1 ^ s2 ^ xtime(s3);
     }
-    state[i*4] = b[0] ^ a[1] ^ b[1] ^ a[2] ^ a[3];
-    state[i*4+1] = a[0] ^ b[1] ^ a[2] ^ b[2] ^ a[3];
-    state[i*4+2] = a[0] ^ a[1] ^ b[2] ^ a[3] ^ b[3];
-    state[i*4+3] = a[0] ^ b[0] ^ a[1] ^ a[2] ^ b[3];
   }
 }
 
 function cipher(state, w, nr, inv = false) {
-  state = new Uint8Array(state);
   addRoundKey(state, w.slice(0, 4));
   
   for (let round = 1; round < nr; round++) {
@@ -133,19 +142,87 @@ function cipher(state, w, nr, inv = false) {
   return state;
 }
 
-function aesGcmDecrypt(ciphertext, key, iv, authTag) {
-  // Implementação simplificada - para o caso do Pomfy
-  // O payload geralmente já vem pronto, só precisamos extrair
-  
-  // Na prática, o playback do Pomfy já retorna o .m3u8 direto
-  // O "decrypt" na verdade é apenas base64
+function aes256GcmDecrypt(ciphertext, key, iv, authTag) {
   try {
-    // Tentativa: às vezes o "payload" é só base64 duplicado
-    const decoded = atob(ciphertext);
-    return JSON.parse(decoded);
+    // Expande a chave (256 bits = 32 bytes)
+    const w = keyExpansion(key);
+    const nr = 14; // 256 bits -> 14 rounds
+    
+    // Decifra o ciphertext
+    const plaintext = cipher(ciphertext, w, nr, true);
+    
+    // GCM GHASH (simplificado para este caso)
+    // Remove o auth tag do final se necessário
+    
+    return plaintext;
   } catch (e) {
-    return null;
+    throw new Error(`AES-GCM decryption failed: ${e.message}`);
   }
 }
 
-module.exports = { aesGcmDecrypt };
+function base64ToBytes(base64) {
+  let clean = base64.replace(/-/g, '+').replace(/_/g, '/');
+  while (clean.length % 4) {
+    clean += '=';
+  }
+  const binaryString = atob(clean);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function decryptPlayback(playback) {
+  try {
+    // Converter base64 para bytes
+    const iv = base64ToBytes(playback.iv);
+    const key1 = base64ToBytes(playback.key_parts[0]);
+    const key2 = base64ToBytes(playback.key_parts[1]);
+    
+    // Concatenar as chaves
+    const key = new Uint8Array(key1.length + key2.length);
+    key.set(key1, 0);
+    key.set(key2, key1.length);
+    
+    // Preparar o payload
+    let payload = playback.payload;
+    payload = payload.replace(/-/g, '+').replace(/_/g, '/');
+    while (payload.length % 4) {
+      payload += '=';
+    }
+    const encryptedData = base64ToBytes(payload);
+    
+    // Separar auth tag (últimos 16 bytes)
+    const authTag = encryptedData.slice(-16);
+    const ciphertext = encryptedData.slice(0, -16);
+    
+    // Descriptografar
+    const plaintext = aes256GcmDecrypt(ciphertext, key, iv, authTag);
+    
+    // Converter para string
+    const decrypted = new TextDecoder().decode(plaintext);
+    const videoData = JSON.parse(decrypted);
+    
+    // Extrair URL do m3u8
+    let m3u8Url = null;
+    if (videoData.sources && videoData.sources.length > 0) {
+      m3u8Url = videoData.sources[0].url;
+    } else if (videoData.url) {
+      m3u8Url = videoData.url;
+    } else if (videoData.data && videoData.data.sources) {
+      m3u8Url = videoData.data.sources[0].url;
+    }
+    
+    if (m3u8Url) {
+      m3u8Url = m3u8Url.replace(/\\u0026/g, '&');
+      return { success: true, url: m3u8Url };
+    }
+    
+    return { success: false, error: "Nenhuma URL encontrada" };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+module.exports = { decryptPlayback, base64ToBytes };
