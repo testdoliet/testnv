@@ -1,6 +1,6 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Versão Híbrida: Primeiro Código Funcional + Fingerprinting Realista
+ * Versão Final: Estabilidade do Código Antigo + Fingerprint Funcional
  * SEM dependências de Buffer ou crypto (100% manual)
  */
 
@@ -232,7 +232,7 @@ class AES256GCM_Manual {
 }
 
 // ==============================================
-// GERAÇÃO DE FINGERPRINT REALISTA
+// GERAÇÃO DE FINGERPRINT FUNCIONAL
 // ==============================================
 
 function generateRandomHex(length) {
@@ -249,7 +249,26 @@ function generateUUID() {
   });
 }
 
-function generateFingerprintPayload(viewerId, deviceId, challengeId, nonce, signature, publicKey) {
+/**
+ * Gera o fingerprint completo que faz os links funcionarem.
+ * Não precisa do challenge se o payload for realista.
+ */
+function generateFingerprint() {
+  const viewerId = generateUUID();
+  const deviceId = generateUUID();
+  const timestamp = Math.floor(Date.now() / 1000);
+  
+  // Payload do Token (JSON -> Base64)
+  const payload = {
+    viewer_id: viewerId,
+    device_id: deviceId,
+    confidence: 0.93,
+    iat: timestamp,
+    exp: timestamp + 600
+  };
+  const token = bytesToBase64(stringToUtf8Bytes(JSON.stringify(payload)));
+
+  // Client Fingerprint (Entropia)
   const client = {
     user_agent: USER_AGENT,
     architecture: "arm",
@@ -272,19 +291,20 @@ function generateFingerprintPayload(viewerId, deviceId, challengeId, nonce, sign
     audio_hash: "b" + generateRandomHex(31),
     extra: { vendor: "Google Inc.", appVersion: "5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36" }
   };
+
   const storage = {
     cookie: viewerId,
     local_storage: viewerId,
     indexed_db: `${viewerId}:${deviceId}`,
     cache_storage: `${viewerId}:${deviceId}`
   };
+
+  // Retorna o objeto completo que será enviado no POST do playback
   return {
+    token: token,
     viewer_id: viewerId,
     device_id: deviceId,
-    challenge_id: challengeId,
-    nonce: nonce,
-    signature: signature,
-    public_key: publicKey,
+    confidence: 0.93,
     client: client,
     storage: storage,
     attributes: { entropy: 0.93 }
@@ -303,9 +323,7 @@ function convertImdbToTmdb(imdbId, mediaType) {
   return __async(this, null, function* () {
     try {
       const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-      const response = yield fetch(url, {
-        headers: { "User-Agent": USER_AGENT, "Accept": "application/json" }
-      });
+      const response = yield fetch(url, { headers: { "User-Agent": USER_AGENT, "Accept": "application/json" } });
       if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
       const data = yield response.json();
       const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
@@ -353,13 +371,12 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
 
     log(`🔍 [0/7] Iniciando busca`, `${mediaType} ${tmdbId}`);
 
-    // Converter IMDb se necessário (lógica do primeiro código)
     if (isImdbId(tmdbId)) {
-      log(`🔄 [0/7] IMDb detectado: ${tmdbId}`, "Convertendo para TMDb...");
+      log(`🔄 [0/7] IMDb detectado: ${tmdbId}`, "Convertendo...");
       const conversion = yield convertImdbToTmdb(tmdbId, mediaType);
       if (conversion.success) {
         finalTmdbId = conversion.tmdbId;
-        log(`✅ [0/7] Convertido: ${tmdbId} → ${finalTmdbId}`, "Sucesso");
+        log(`✅ [0/7] Convertido: ${finalTmdbId}`, "Sucesso");
       } else {
         log(`❌ [0/7] Falha na conversão: ${conversion.error}`, "Erro");
         return streams;
@@ -372,82 +389,56 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
 
     try {
-      // 1. Obter Byse ID do HTML
+      // 1. Obter Byse ID
       const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${finalTmdbId}` : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
       log(`📡 [1/7] Buscando HTML`, pomfyUrl);
       const response = yield fetch(pomfyUrl, { headers: HEADERS });
-      if (!response.ok) {
-        log(`❌ [1/7] Falha no Pomfy: HTTP ${response.status}`, "Erro");
-        return streams;
-      }
+      if (!response.ok) return streams;
       const html = yield response.text();
       const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
       if (!linkMatch) {
-        log(`❌ [2/7] Link não encontrado no HTML`, "Conteúdo indisponível");
+        log(`❌ [2/7] Link não encontrado`, "Erro");
         return streams;
       }
       const byseUrl = linkMatch[1];
       const byseId = byseUrl.split("/").pop();
       log(`✅ [2/7] Byse ID: ${byseId}`, byseUrl);
 
-      // 2. Obter Detalhes do Embed
+      // 2. Obter Detalhes
       const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
       const detailsRes = yield fetch(detailsUrl, {
         headers: { "referer": byseUrl, "x-embed-origin": "api.pomfy.stream", "user-agent": USER_AGENT, "Cookie": COOKIE }
       });
-      if (!detailsRes.ok) {
-        log(`❌ [3/7] Falha nos detalhes: HTTP ${detailsRes.status}`, "Erro");
-        return streams;
-      }
+      if (!detailsRes.ok) return streams;
       const details = yield detailsRes.json();
       const embedUrl = details.embed_frame_url;
-      if (!embedUrl) {
-        log(`❌ [3/7] Embed Frame URL não encontrado`, "Erro");
-        return streams;
-      }
+      if (!embedUrl) return streams;
       const playerDomain = new URL(embedUrl).origin;
       log(`✅ [3/7] Embed URL obtida`, embedUrl);
 
-      // 3. Obter Challenge para Fingerprint
-      log(`🔐 [4/7] Solicitando Challenge`, playerDomain);
-      const challengeUrl = `${playerDomain}/api/videos/${byseId}/embed/challenge`;
-      const challengeRes = yield fetch(challengeUrl, {
-        method: "POST",
-        headers: { "origin": playerDomain, "referer": embedUrl, "user-agent": USER_AGENT }
-      });
-      if (!challengeRes.ok) {
-        log(`❌ [4/7] Falha no Challenge: HTTP ${challengeRes.status}`, "Erro");
-        return streams;
-      }
-      const challenge = yield challengeRes.json();
-      
-      // 4. Gerar Fingerprint Realista
-      const viewerId = generateUUID();
-      const deviceId = generateUUID();
-      const publicKey = { kty: "OKP", crv: "Ed25519", x: generateRandomHex(43), kid: generateUUID() };
-      const signature = generateRandomHex(86);
-      const fingerprintPayload = generateFingerprintPayload(viewerId, deviceId, challenge.challenge_id, challenge.nonce, signature, publicKey);
-      log(`✅ [5/7] Fingerprint gerado com Challenge`, `ID: ${challenge.challenge_id.substring(0,8)}`);
+      // 3. Gerar Fingerprint (Lógica Nova e Funcional)
+      const fingerprint = generateFingerprint();
+      log(`🔐 [5/7] Fingerprint gerado`, `ID: ${fingerprint.viewer_id.substring(0,8)}`);
 
-      // 5. Solicitar Playback
-      log(`🎬 [6/7] Solicitando Playback`, "Enviando Fingerprint...");
+      // 4. Playback
       const playbackUrl = `${playerDomain}/api/videos/${byseId}/embed/playback`;
+      log(`🎬 [6/7] Solicitando Playback`, playbackUrl);
       const playbackRes = yield fetch(playbackUrl, {
         method: "POST",
         headers: { "content-type": "application/json", "origin": playerDomain, "referer": embedUrl, "user-agent": USER_AGENT },
-        body: JSON.stringify({ fingerprint: fingerprintPayload })
+        body: JSON.stringify({ fingerprint: fingerprint })
       });
       if (!playbackRes.ok) {
-        log(`❌ [6/7] Falha no Playback: HTTP ${playbackRes.status}`, "Erro");
+        log(`❌ [6/7] Playback Negado: HTTP ${playbackRes.status}`, "Erro");
         return streams;
       }
       const playbackData = yield playbackRes.json();
       
-      // 6. Descriptografar
-      log(`🔓 [7/7] Descriptografando Payload`, "AES-256-GCM");
+      // 5. Descriptografar
+      log(`🔓 [7/7] Descriptografando`, "AES-256-GCM");
       const decryptResult = decryptPlayback(playbackData.playback);
       if (decryptResult.success) {
-        log(`🎉 SUCESSO! Stream encontrado`, `Qualidade: 1080p`, decryptResult.url);
+        log(`🎉 SUCESSO! Stream encontrado`, `1080p`, decryptResult.url);
         streams.push({
           name: "Pomfy",
           title: "Multi-Qualidade",
@@ -455,11 +446,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
           quality: 1080,
           headers: { "User-Agent": USER_AGENT, "Referer": embedUrl }
         });
-      } else {
-        log(`❌ [7/7] Erro ao descriptografar: ${decryptResult.error}`, "Erro");
       }
 
-    } catch (e) { log(`❌ ERRO CRÍTICO`, e.message); }
+    } catch (e) { log(`❌ ERRO`, e.message); }
     return streams;
   });
 }
