@@ -1,6 +1,7 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Com AES-GCM completo em JavaScript puro (SEM Buffer)
+ * Com AES-GCM completo em JavaScript puro
+ * SEM dependências de Buffer ou crypto (100% manual)
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -46,91 +47,144 @@ const HEADERS = {
 };
 
 // ==============================================
-// UTF-8 MANUAL
+// BASE64 MANUAL (sem Buffer)
 // ==============================================
 
-function utf8Encode(str) {
-  const bytes = [];
-  for (let i = 0; i < str.length; i++) {
-    let code = str.charCodeAt(i);
-    if (code < 0x80) {
-      bytes.push(code);
-    } else if (code < 0x800) {
-      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
-    } else if (code < 0xd800 || code >= 0xe000) {
-      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
-    } else {
-      i++;
-      code = 0x10000 + (((code & 0x3ff) << 10) | (str.charCodeAt(i) & 0x3ff));
-      bytes.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 0x3f), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
-    }
+const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * Decodifica uma string Base64 (ou Base64url) para Uint8Array.
+ * Não usa Buffer nem atob — opera puramente com aritmética de bits.
+ */
+function base64ToBytes(base64) {
+  // Normaliza Base64url para Base64 padrão e adiciona padding
+  let b64 = base64.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4 !== 0) b64 += '=';
+
+  // Monta tabela de lookup reversa
+  const lookup = new Uint8Array(256).fill(255);
+  for (let i = 0; i < 64; i++) lookup[BASE64_CHARS.charCodeAt(i)] = i;
+
+  // Calcula tamanho de saída
+  const len = b64.length;
+  let outputLen = (len * 3) >> 2;
+  if (b64[len - 1] === '=') outputLen--;
+  if (b64[len - 2] === '=') outputLen--;
+
+  const bytes = new Uint8Array(outputLen);
+  let byteIdx = 0;
+
+  for (let i = 0; i < len; i += 4) {
+    const a = lookup[b64.charCodeAt(i)];
+    const b = lookup[b64.charCodeAt(i + 1)];
+    const c = lookup[b64.charCodeAt(i + 2)];
+    const d = lookup[b64.charCodeAt(i + 3)];
+
+    if (byteIdx < outputLen) bytes[byteIdx++] = (a << 2) | (b >> 4);
+    if (byteIdx < outputLen) bytes[byteIdx++] = ((b & 0x0f) << 4) | (c >> 2);
+    if (byteIdx < outputLen) bytes[byteIdx++] = ((c & 0x03) << 6) | d;
   }
+
   return bytes;
 }
 
-function utf8Decode(bytes) {
-  let str = "";
+/**
+ * Codifica um Uint8Array (ou array de bytes) para string Base64 padrão.
+ * Não usa Buffer nem btoa — opera puramente com aritmética de bits.
+ */
+function bytesToBase64(bytes) {
+  let result = '';
+  const len = bytes.length;
+
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+
+    result += BASE64_CHARS[b0 >> 2];
+    result += BASE64_CHARS[((b0 & 0x03) << 4) | (b1 >> 4)];
+    result += i + 1 < len ? BASE64_CHARS[((b1 & 0x0f) << 2) | (b2 >> 6)] : '=';
+    result += i + 2 < len ? BASE64_CHARS[b2 & 0x3f] : '=';
+  }
+
+  return result;
+}
+
+// ==============================================
+// UTF-8 MANUAL (sem Buffer)
+// ==============================================
+
+/**
+ * Converte um Uint8Array de bytes UTF-8 para string JavaScript.
+ * Não usa Buffer nem TextDecoder — decodifica manualmente os multi-bytes.
+ */
+function utf8BytesToString(bytes) {
+  let str = '';
   let i = 0;
   while (i < bytes.length) {
-    let b1 = bytes[i++];
-    if (b1 < 0x80) {
-      str += String.fromCharCode(b1);
-    } else if (b1 >= 0xc0 && b1 < 0xe0) {
-      let b2 = bytes[i++];
-      str += String.fromCharCode(((b1 & 0x1f) << 6) | (b2 & 0x3f));
-    } else if (b1 >= 0xe0 && b1 < 0xf0) {
-      let b2 = bytes[i++];
-      let b3 = bytes[i++];
-      str += String.fromCharCode(((b1 & 0x0f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f));
+    const byte = bytes[i];
+    if (byte < 0x80) {
+      // 1 byte: U+0000 a U+007F
+      str += String.fromCharCode(byte);
+      i += 1;
+    } else if ((byte & 0xe0) === 0xc0) {
+      // 2 bytes: U+0080 a U+07FF
+      const cp = ((byte & 0x1f) << 6) | (bytes[i + 1] & 0x3f);
+      str += String.fromCharCode(cp);
+      i += 2;
+    } else if ((byte & 0xf0) === 0xe0) {
+      // 3 bytes: U+0800 a U+FFFF
+      const cp = ((byte & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f);
+      str += String.fromCharCode(cp);
+      i += 3;
+    } else if ((byte & 0xf8) === 0xf0) {
+      // 4 bytes: U+10000 a U+10FFFF (surrogate pair)
+      const cp = ((byte & 0x07) << 18) | ((bytes[i + 1] & 0x3f) << 12) |
+                 ((bytes[i + 2] & 0x3f) << 6) | (bytes[i + 3] & 0x3f);
+      const hi = Math.floor((cp - 0x10000) / 0x400) + 0xd800;
+      const lo = ((cp - 0x10000) % 0x400) + 0xdc00;
+      str += String.fromCharCode(hi, lo);
+      i += 4;
     } else {
-      let b2 = bytes[i++];
-      let b3 = bytes[i++];
-      let b4 = bytes[i++];
-      let code = ((b1 & 0x07) << 18) | ((b2 & 0x3f) << 12) | ((b3 & 0x3f) << 6) | (b4 & 0x3f);
-      str += String.fromCharCode(0xd800 + ((code - 0x10000) >> 10), 0xdc00 + ((code - 0x10000) & 0x3ff));
+      // Byte inválido — avança
+      i += 1;
     }
   }
   return str;
 }
 
-// ==============================================
-// BASE64 MANUAL
-// ==============================================
-
-const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-function base64ToBytes(base64) {
-  let clean = base64.replace(/-/g, '+').replace(/_/g, '/');
-  while (clean.length % 4) {
-    clean += '=';
-  }
-  
+/**
+ * Converte uma string JavaScript para Uint8Array de bytes UTF-8.
+ * Não usa Buffer nem TextEncoder — codifica manualmente os multi-bytes.
+ */
+function stringToUtf8Bytes(str) {
   const bytes = [];
-  for (let i = 0; i < clean.length; i += 4) {
-    const chunk = clean.substr(i, 4);
-    const n = (BASE64_CHARS.indexOf(chunk[0]) << 18) |
-              (BASE64_CHARS.indexOf(chunk[1]) << 12) |
-              (BASE64_CHARS.indexOf(chunk[2]) << 6) |
-              BASE64_CHARS.indexOf(chunk[3]);
-    
-    bytes.push((n >> 16) & 0xff);
-    if (chunk[2] !== '=') bytes.push((n >> 8) & 0xff);
-    if (chunk[3] !== '=') bytes.push(n & 0xff);
+  for (let i = 0; i < str.length; i++) {
+    let cp = str.charCodeAt(i);
+    // Surrogate pair
+    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < str.length) {
+      const lo = str.charCodeAt(i + 1);
+      if (lo >= 0xdc00 && lo <= 0xdfff) {
+        cp = 0x10000 + (cp - 0xd800) * 0x400 + (lo - 0xdc00);
+        i++;
+      }
+    }
+    if (cp < 0x80) {
+      bytes.push(cp);
+    } else if (cp < 0x800) {
+      bytes.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+    } else if (cp < 0x10000) {
+      bytes.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    } else {
+      bytes.push(
+        0xf0 | (cp >> 18),
+        0x80 | ((cp >> 12) & 0x3f),
+        0x80 | ((cp >> 6) & 0x3f),
+        0x80 | (cp & 0x3f)
+      );
+    }
   }
-  
   return new Uint8Array(bytes);
-}
-
-function bytesToBase64(bytes) {
-  let result = "";
-  for (let i = 0; i < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);
-    result += BASE64_CHARS[(n >> 18) & 0x3f];
-    result += BASE64_CHARS[(n >> 12) & 0x3f];
-    result += (i + 1 < bytes.length) ? BASE64_CHARS[(n >> 6) & 0x3f] : '=';
-    result += (i + 2 < bytes.length) ? BASE64_CHARS[n & 0x3f] : '=';
-  }
-  return result;
 }
 
 // ==============================================
@@ -197,7 +251,7 @@ class AES256GCM_Manual {
   }
 
   _encryptBlock(block) {
-    let state = Array.from({ length: 4 }, (_, r) => 
+    let state = Array.from({ length: 4 }, (_, r) =>
       Array.from({ length: 4 }, (_, c) => block[r + c * 4])
     );
 
@@ -214,7 +268,7 @@ class AES256GCM_Manual {
 
     for (let round = 1; round < 14; round++) {
       for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) state[r][c] = SBOX[state[r][c]];
-      
+
       let row1 = state[1], row2 = state[2], row3 = state[3];
       state[1] = [row1[1], row1[2], row1[3], row1[0]];
       state[2] = [row2[2], row2[3], row2[0], row2[1]];
@@ -258,7 +312,8 @@ class AES256GCM_Manual {
         if (counter[j] !== 0) break;
       }
     }
-    return utf8Decode(plaintext);
+    // Converte Uint8Array UTF-8 → string sem usar Buffer
+    return utf8BytesToString(plaintext);
   }
 }
 
@@ -271,25 +326,23 @@ function decryptPlayback(playback) {
     const iv = base64ToBytes(playback.iv);
     const key1 = base64ToBytes(playback.key_parts[0]);
     const key2 = base64ToBytes(playback.key_parts[1]);
-    
+
+    // Concatena as duas partes da chave em um único Uint8Array (sem Buffer.concat)
     const key = new Uint8Array(key1.length + key2.length);
     key.set(key1, 0);
     key.set(key2, key1.length);
-    
-    let payload = playback.payload;
-    payload = payload.replace(/-/g, '+').replace(/_/g, '/');
-    while (payload.length % 4) {
-      payload += '=';
-    }
-    const encryptedData = base64ToBytes(payload);
-    
+
+    // Decodifica o payload cifrado (sem Buffer)
+    const encryptedData = base64ToBytes(playback.payload);
+
+    // Remove os 16 bytes finais do tag GCM
     const ciphertext = encryptedData.slice(0, -16);
-    
+
     const cipher = new AES256GCM_Manual(key);
     const decrypted = cipher.decrypt(iv, ciphertext);
-    
+
     const videoData = JSON.parse(decrypted);
-    
+
     let m3u8Url = null;
     if (videoData.sources && videoData.sources.length > 0) {
       m3u8Url = videoData.sources[0].url;
@@ -298,12 +351,12 @@ function decryptPlayback(playback) {
     } else if (videoData.data && videoData.data.sources) {
       m3u8Url = videoData.data.sources[0].url;
     }
-    
+
     if (m3u8Url) {
       m3u8Url = m3u8Url.replace(/\\u0026/g, '&');
       return { success: true, url: m3u8Url };
     }
-    
+
     return { success: false, error: "Nenhuma URL encontrada" };
   } catch (error) {
     return { success: false, error: error.message };
@@ -353,7 +406,7 @@ function generateFingerprint() {
   const viewerId = generateRandomId(32);
   const deviceId = generateRandomId(32);
   const timestamp = Math.floor(Date.now() / 1000);
-  
+
   const payload = {
     viewer_id: viewerId,
     device_id: deviceId,
@@ -361,11 +414,11 @@ function generateFingerprint() {
     iat: timestamp,
     exp: timestamp + 600
   };
-  
-  const jsonStr = JSON.stringify(payload);
-  const jsonBytes = utf8Encode(jsonStr);
-  const token = bytesToBase64(new Uint8Array(jsonBytes));
-  
+
+  // Codifica JSON → UTF-8 bytes → Base64 sem usar Buffer
+  const jsonBytes = stringToUtf8Bytes(JSON.stringify(payload));
+  const token = bytesToBase64(jsonBytes);
+
   return {
     token: token,
     viewer_id: viewerId,
@@ -382,7 +435,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
   return __async(this, null, function* () {
     const streams = [];
     let finalTmdbId = tmdbId;
-    
+
     // Debug: Início
     streams.push({
       name: `🔍 [0/7] Iniciando busca`,
@@ -391,7 +444,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       quality: 1080,
       headers: HEADERS
     });
-    
+
     // Converter IMDb se necessário
     if (isImdbId(tmdbId)) {
       streams.push({
@@ -401,9 +454,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const conversion = yield convertImdbToTmdb(tmdbId, mediaType);
-      
+
       if (conversion.success) {
         finalTmdbId = conversion.tmdbId;
         streams.push({
@@ -433,10 +486,10 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         headers: HEADERS
       });
     }
-    
+
     const seasonNum = mediaType === "movie" ? 1 : (season || 1);
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
-    
+
     streams.push({
       name: `📡 [1/7] Buscando HTML do Pomfy`,
       title: `${mediaType} ${finalTmdbId} S${seasonNum}E${episodeNum}`,
@@ -444,10 +497,12 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       quality: 1080,
       headers: HEADERS
     });
-    
+
     try {
-      const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${finalTmdbId}` : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
-      
+      const pomfyUrl = mediaType === "movie"
+        ? `${API_POMFY}/filme/${finalTmdbId}`
+        : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
+
       streams.push({
         name: `🌐 [1/7] URL: ${pomfyUrl}`,
         title: "Requisição HTTP",
@@ -455,9 +510,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const response = yield fetch(pomfyUrl, { headers: HEADERS });
-      
+
       streams.push({
         name: `📊 [1/7] HTTP ${response.status}`,
         title: response.ok ? "OK" : "FALHOU",
@@ -465,11 +520,11 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       if (!response.ok) return streams;
-      
+
       const html = yield response.text();
-      
+
       streams.push({
         name: `✅ [1/7] HTML recebido (${html.length} bytes)`,
         title: "Página carregada",
@@ -477,7 +532,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
       if (!linkMatch) {
         streams.push({
@@ -489,10 +544,10 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         });
         return streams;
       }
-      
+
       const byseUrl = linkMatch[1];
       const byseId = byseUrl.split("/").pop();
-      
+
       streams.push({
         name: `✅ [2/7] Byse ID: ${byseId}`,
         title: byseUrl,
@@ -500,9 +555,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
-      
+
       streams.push({
         name: `📡 [3/7] Buscando detalhes do vídeo`,
         title: detailsUrl,
@@ -510,7 +565,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const detailsResponse = yield fetch(detailsUrl, {
         headers: {
           "accept": "*/*",
@@ -521,7 +576,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
           "Cookie": COOKIE
         }
       });
-      
+
       streams.push({
         name: `📊 [3/7] Detalhes HTTP ${detailsResponse.status}`,
         title: detailsResponse.ok ? "OK" : "FALHOU",
@@ -529,12 +584,12 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       if (!detailsResponse.ok) return streams;
-      
+
       const detailsData = yield detailsResponse.json();
       const embedUrl = detailsData.embed_frame_url;
-      
+
       streams.push({
         name: `✅ [3/7] Embed URL obtida`,
         title: embedUrl,
@@ -542,7 +597,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       if (!embedUrl) {
         streams.push({
           name: `❌ [3/7] embed_frame_url não encontrado`,
@@ -553,9 +608,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         });
         return streams;
       }
-      
+
       const embedDomain = new URL(embedUrl).origin;
-      
+
       streams.push({
         name: `🌐 [4/7] Embed domain: ${embedDomain}`,
         title: "Domínio extraído",
@@ -563,9 +618,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const fingerprint = generateFingerprint();
-      
+
       streams.push({
         name: `🔐 [5/7] Fingerprint gerado`,
         title: `viewer_id: ${fingerprint.viewer_id.substring(0, 16)}...`,
@@ -573,9 +628,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const playbackUrl = `${embedDomain}/api/videos/${byseId}/embed/playback`;
-      
+
       streams.push({
         name: `🎬 [6/7] Solicitando playback`,
         title: playbackUrl,
@@ -583,7 +638,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const playbackResponse = yield fetch(playbackUrl, {
         method: "POST",
         headers: {
@@ -598,7 +653,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         },
         body: JSON.stringify({ fingerprint: fingerprint })
       });
-      
+
       streams.push({
         name: `📊 [6/7] Playback HTTP ${playbackResponse.status}`,
         title: playbackResponse.ok ? "OK" : "FALHOU",
@@ -606,11 +661,11 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       if (!playbackResponse.ok) return streams;
-      
+
       const playbackData = yield playbackResponse.json();
-      
+
       streams.push({
         name: `✅ [6/7] Playback recebido`,
         title: `playback existe: ${!!playbackData.playback}`,
@@ -618,7 +673,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       if (!playbackData.playback) {
         streams.push({
           name: `❌ [6/7] Playback sem dados`,
@@ -629,7 +684,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         });
         return streams;
       }
-      
+
       streams.push({
         name: `🔓 [7/7] Descriptografando payload AES-256-GCM`,
         title: "Processando...",
@@ -637,9 +692,9 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
+
       const decryptResult = decryptPlayback(playbackData.playback);
-      
+
       if (!decryptResult.success) {
         streams.push({
           name: `❌ [7/7] Falha na descriptografia: ${decryptResult.error}`,
@@ -650,7 +705,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         });
         return streams;
       }
-      
+
       streams.push({
         name: `✅ [7/7] Payload decifrado com sucesso!`,
         title: "URL extraída",
@@ -658,9 +713,11 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         quality: 1080,
         headers: HEADERS
       });
-      
-      const title = mediaType === "movie" ? `Filme ${finalTmdbId}` : `S${seasonNum.toString().padStart(2, "0")}E${episodeNum.toString().padStart(2, "0")}`;
-      
+
+      const title = mediaType === "movie"
+        ? `Filme ${finalTmdbId}`
+        : `S${seasonNum.toString().padStart(2, "0")}E${episodeNum.toString().padStart(2, "0")}`;
+
       streams.push({
         name: `🎉 SUCESSO! Stream encontrado`,
         title: title,
@@ -672,7 +729,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
           "Accept": "*/*"
         }
       });
-      
+
     } catch (error) {
       streams.push({
         name: `❌ ERRO: ${error.message}`,
@@ -682,7 +739,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         headers: HEADERS
       });
     }
-    
+
     return streams;
   });
 }
