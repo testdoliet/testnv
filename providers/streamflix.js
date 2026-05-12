@@ -30,6 +30,8 @@ var __async = (__this, __arguments, generator) => {
 // ==============================================
 
 const API_POMFY = "https://api.pomfy.stream";
+const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const COOKIE = "SITE_TOTAL_ID=aTYqe6GU65PNmeCXpelwJwAAAMi; __dtsu=104017651574995957BEB724C6373F9E; __cc_id=a44d1e52993b9c2Oaaf40eba24989a06";
 
 const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36";
@@ -144,6 +146,32 @@ function stringToUtf8Bytes(str) {
     }
   }
   return new Uint8Array(bytes);
+}
+
+// ==============================================
+// CONVERTER IMDb PARA TMDb
+// ==============================================
+
+function isImdbId(id) {
+  return typeof id === "string" && id.toLowerCase().startsWith("tt");
+}
+
+function convertImdbToTmdb(imdbId, mediaType) {
+  return __async(this, null, function* () {
+    try {
+      const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+      const response = yield fetch(url, {
+        headers: { "User-Agent": USER_AGENT, "Accept": "application/json" }
+      });
+      if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
+      const data = yield response.json();
+      const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
+      if (results && results.length > 0) return { success: true, tmdbId: results[0].id };
+      return { success: false, error: "Nenhum resultado encontrado" };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
 }
 
 // ==============================================
@@ -309,7 +337,7 @@ function decryptPlayback(playback) {
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL getStreams
+// GERAR FINGERPRINT
 // ==============================================
 
 function generateFingerprint() {
@@ -331,6 +359,10 @@ function generateFingerprint() {
   return { token, viewer_id: viewerId, device_id: deviceId, confidence: 0.93 };
 }
 
+// ==============================================
+// FUNÇÃO PRINCIPAL getStreams
+// ==============================================
+
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
     const streams = [];
@@ -339,13 +371,30 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       streams.push({ name, title, url, quality: 1080, headers: HEADERS });
     };
 
-    addDebug(`🔍 [1/6] Iniciando busca`, `${mediaType} ${tmdbId}`);
+    addDebug(`🔍 [0/6] Iniciando busca`, `${mediaType} ${tmdbId}`);
+
+    // CONVERTER IMDb se necessário
+    let finalTmdbId = tmdbId;
+    if (isImdbId(tmdbId)) {
+      addDebug(`🔄 [0/6] IMDb detectado: ${tmdbId}`, "Convertendo para TMDb...");
+      const conversion = yield convertImdbToTmdb(tmdbId, mediaType);
+      if (conversion.success) {
+        finalTmdbId = conversion.tmdbId;
+        addDebug(`✅ [0/6] Convertido: ${tmdbId} → ${finalTmdbId}`, "");
+      } else {
+        addDebug(`❌ [0/6] Falha na conversão: ${conversion.error}`, "");
+        return streams;
+      }
+    }
+
+    const seasonNum = mediaType === "movie" ? 1 : (season || 1);
+    const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
 
     try {
       // PASSO 1: Buscar HTML do Pomfy
       const pomfyUrl = mediaType === "movie" 
-        ? `${API_POMFY}/filme/${tmdbId}` 
-        : `${API_POMFY}/serie/${tmdbId}/${season || 1}/${episode || 1}`;
+        ? `${API_POMFY}/filme/${finalTmdbId}` 
+        : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
       
       addDebug(`🌐 [1/6] Buscando HTML`, pomfyUrl);
       const response = yield fetch(pomfyUrl, { headers: HEADERS });
@@ -422,7 +471,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         addDebug(`🎉 SUCESSO!`, `URL: ${decryptResult.url.substring(0, 80)}...`);
         streams.push({
           name: "Pomfy",
-          title: `${mediaType === "movie" ? "Filme" : `S${String(season || 1).padStart(2, '0')}E${String(episode || 1).padStart(2, '0')}`}`,
+          title: mediaType === "movie" ? `Filme ${finalTmdbId}` : `S${String(seasonNum).padStart(2, '0')}E${String(episodeNum).padStart(2, '0')}`,
           url: decryptResult.url,
           quality: 1080,
           headers: { "User-Agent": USER_AGENT, "Referer": embedUrl }
