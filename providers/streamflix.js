@@ -1,25 +1,16 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Com AES-GCM completo em JavaScript puro
+ * Versão Híbrida: Primeiro Código Funcional + Fingerprinting Realista
  * SEM dependências de Buffer ou crypto (100% manual)
- * Fingerprinting Realista com Challenge/Nonce
  */
 
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
     var fulfilled = (value) => {
-      try {
-        step(generator.next(value));
-      } catch (e) {
-        reject(e);
-      }
+      try { step(generator.next(value)); } catch (e) { reject(e); }
     };
     var rejected = (value) => {
-      try {
-        step(generator.throw(value));
-      } catch (e) {
-        reject(e);
-      }
+      try { step(generator.throw(value)); } catch (e) { reject(e); }
     };
     var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
     step((generator = generator.apply(__this, __arguments)).next());
@@ -301,7 +292,31 @@ function generateFingerprintPayload(viewerId, deviceId, challengeId, nonce, sign
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL getStreams
+// FUNÇÕES AUXILIARES (CONVERSÃO TMDb)
+// ==============================================
+
+function isImdbId(id) {
+  return typeof id === "string" && id.toLowerCase().startsWith("tt");
+}
+
+function convertImdbToTmdb(imdbId, mediaType) {
+  return __async(this, null, function* () {
+    try {
+      const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+      const response = yield fetch(url, {
+        headers: { "User-Agent": USER_AGENT, "Accept": "application/json" }
+      });
+      if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
+      const data = yield response.json();
+      const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
+      if (results && results.length > 0) return { success: true, tmdbId: results[0].id };
+      return { success: false, error: "Nenhum resultado encontrado" };
+    } catch (error) { return { success: false, error: error.message }; }
+  });
+}
+
+// ==============================================
+// DESCRIPTOGRAFAR PLAYBACK
 // ==============================================
 
 function decryptPlayback(playback) {
@@ -323,21 +338,46 @@ function decryptPlayback(playback) {
   } catch (e) { return { success: false, error: e.message }; }
 }
 
+// ==============================================
+// FUNÇÃO PRINCIPAL getStreams
+// ==============================================
+
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
     const streams = [];
+    let finalTmdbId = tmdbId;
+
     const log = (name, title, url = "debug://log") => {
       streams.push({ name, title, url, quality: 1080, headers: HEADERS });
     };
 
     log(`🔍 [0/7] Iniciando busca`, `${mediaType} ${tmdbId}`);
 
+    // Converter IMDb se necessário (lógica do primeiro código)
+    if (isImdbId(tmdbId)) {
+      log(`🔄 [0/7] IMDb detectado: ${tmdbId}`, "Convertendo para TMDb...");
+      const conversion = yield convertImdbToTmdb(tmdbId, mediaType);
+      if (conversion.success) {
+        finalTmdbId = conversion.tmdbId;
+        log(`✅ [0/7] Convertido: ${tmdbId} → ${finalTmdbId}`, "Sucesso");
+      } else {
+        log(`❌ [0/7] Falha na conversão: ${conversion.error}`, "Erro");
+        return streams;
+      }
+    } else if (typeof tmdbId === "string" && !isNaN(parseInt(tmdbId))) {
+      finalTmdbId = parseInt(tmdbId);
+    }
+
+    const seasonNum = mediaType === "movie" ? 1 : (season || 1);
+    const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
+
     try {
       // 1. Obter Byse ID do HTML
-      const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${tmdbId}` : `${API_POMFY}/serie/${tmdbId}/${season || 1}/${episode || 1}`;
+      const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${finalTmdbId}` : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
+      log(`📡 [1/7] Buscando HTML`, pomfyUrl);
       const response = yield fetch(pomfyUrl, { headers: HEADERS });
       if (!response.ok) {
-        log(`❌ [1/7] Falha no Pomfy: HTTP ${response.status}`, "Erro de requisição");
+        log(`❌ [1/7] Falha no Pomfy: HTTP ${response.status}`, "Erro");
         return streams;
       }
       const html = yield response.text();
@@ -348,7 +388,6 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       }
       const byseUrl = linkMatch[1];
       const byseId = byseUrl.split("/").pop();
-      const embedDomain = new URL(byseUrl).origin;
       log(`✅ [2/7] Byse ID: ${byseId}`, byseUrl);
 
       // 2. Obter Detalhes do Embed
@@ -357,13 +396,13 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         headers: { "referer": byseUrl, "x-embed-origin": "api.pomfy.stream", "user-agent": USER_AGENT, "Cookie": COOKIE }
       });
       if (!detailsRes.ok) {
-        log(`❌ [3/7] Falha nos detalhes: HTTP ${detailsRes.status}`, "Erro de API");
+        log(`❌ [3/7] Falha nos detalhes: HTTP ${detailsRes.status}`, "Erro");
         return streams;
       }
       const details = yield detailsRes.json();
       const embedUrl = details.embed_frame_url;
       if (!embedUrl) {
-        log(`❌ [3/7] Embed Frame URL não encontrado`, "Erro de resposta");
+        log(`❌ [3/7] Embed Frame URL não encontrado`, "Erro");
         return streams;
       }
       const playerDomain = new URL(embedUrl).origin;
@@ -377,7 +416,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         headers: { "origin": playerDomain, "referer": embedUrl, "user-agent": USER_AGENT }
       });
       if (!challengeRes.ok) {
-        log(`❌ [4/7] Falha no Challenge: HTTP ${challengeRes.status}`, "Erro de segurança");
+        log(`❌ [4/7] Falha no Challenge: HTTP ${challengeRes.status}`, "Erro");
         return streams;
       }
       const challenge = yield challengeRes.json();
@@ -399,7 +438,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         body: JSON.stringify({ fingerprint: fingerprintPayload })
       });
       if (!playbackRes.ok) {
-        log(`❌ [6/7] Falha no Playback: HTTP ${playbackRes.status}`, "Acesso negado");
+        log(`❌ [6/7] Falha no Playback: HTTP ${playbackRes.status}`, "Erro");
         return streams;
       }
       const playbackData = yield playbackRes.json();
@@ -409,7 +448,6 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const decryptResult = decryptPlayback(playbackData.playback);
       if (decryptResult.success) {
         log(`🎉 SUCESSO! Stream encontrado`, `Qualidade: 1080p`, decryptResult.url);
-        // Adiciona o stream final real que o player vai usar
         streams.push({
           name: "Pomfy",
           title: "Multi-Qualidade",
@@ -418,14 +456,10 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
           headers: { "User-Agent": USER_AGENT, "Referer": embedUrl }
         });
       } else {
-        log(`❌ [7/7] Erro ao descriptografar: ${decryptResult.error}`, "Falha no processamento");
+        log(`❌ [7/7] Erro ao descriptografar: ${decryptResult.error}`, "Erro");
       }
 
-    } catch (e) { 
-      log(`❌ ERRO CRÍTICO`, e.message); 
-    }
-    
-    // Retorna todos os logs acumulados + o stream final (se houver)
+    } catch (e) { log(`❌ ERRO CRÍTICO`, e.message); }
     return streams;
   });
 }
