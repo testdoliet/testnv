@@ -1,16 +1,25 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Versão Final: Estabilidade do Código Antigo + Fingerprint Funcional
+ * Com AES-GCM completo em JavaScript puro
  * SEM dependências de Buffer ou crypto (100% manual)
+ * Fingerprinting Realista com Challenge/Nonce
  */
 
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
     var fulfilled = (value) => {
-      try { step(generator.next(value)); } catch (e) { reject(e); }
+      try {
+        step(generator.next(value));
+      } catch (e) {
+        reject(e);
+      }
     };
     var rejected = (value) => {
-      try { step(generator.throw(value)); } catch (e) { reject(e); }
+      try {
+        step(generator.throw(value));
+      } catch (e) {
+        reject(e);
+      }
     };
     var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
     step((generator = generator.apply(__this, __arguments)).next());
@@ -232,7 +241,7 @@ class AES256GCM_Manual {
 }
 
 // ==============================================
-// GERAÇÃO DE FINGERPRINT FUNCIONAL
+// GERADORES DE ID
 // ==============================================
 
 function generateRandomHex(length) {
@@ -249,26 +258,18 @@ function generateUUID() {
   });
 }
 
+// ==============================================
+// GERAÇÃO DE FINGERPRINT REALISTA COM CHALLENGE
+// ==============================================
+
 /**
- * Gera o fingerprint completo que faz os links funcionarem.
- * Não precisa do challenge se o payload for realista.
+ * Gera o payload de fingerprinting completo.
+ * Simula a coleta de entropia do navegador.
  */
-function generateFingerprint() {
-  const viewerId = generateUUID();
-  const deviceId = generateUUID();
+function generateFingerprintPayload(viewerId, deviceId, challengeId, nonce, signature, publicKey) {
   const timestamp = Math.floor(Date.now() / 1000);
   
-  // Payload do Token (JSON -> Base64)
-  const payload = {
-    viewer_id: viewerId,
-    device_id: deviceId,
-    confidence: 0.93,
-    iat: timestamp,
-    exp: timestamp + 600
-  };
-  const token = bytesToBase64(stringToUtf8Bytes(JSON.stringify(payload)));
-
-  // Client Fingerprint (Entropia)
+  // Simulação de dados de entropia (client fingerprint)
   const client = {
     user_agent: USER_AGENT,
     architecture: "arm",
@@ -299,12 +300,13 @@ function generateFingerprint() {
     cache_storage: `${viewerId}:${deviceId}`
   };
 
-  // Retorna o objeto completo que será enviado no POST do playback
   return {
-    token: token,
     viewer_id: viewerId,
     device_id: deviceId,
-    confidence: 0.93,
+    challenge_id: challengeId,
+    nonce: nonce,
+    signature: signature,
+    public_key: publicKey,
     client: client,
     storage: storage,
     attributes: { entropy: 0.93 }
@@ -312,29 +314,7 @@ function generateFingerprint() {
 }
 
 // ==============================================
-// FUNÇÕES AUXILIARES (CONVERSÃO TMDb)
-// ==============================================
-
-function isImdbId(id) {
-  return typeof id === "string" && id.toLowerCase().startsWith("tt");
-}
-
-function convertImdbToTmdb(imdbId, mediaType) {
-  return __async(this, null, function* () {
-    try {
-      const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-      const response = yield fetch(url, { headers: { "User-Agent": USER_AGENT, "Accept": "application/json" } });
-      if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
-      const data = yield response.json();
-      const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
-      if (results && results.length > 0) return { success: true, tmdbId: results[0].id };
-      return { success: false, error: "Nenhum resultado encontrado" };
-    } catch (error) { return { success: false, error: error.message }; }
-  });
-}
-
-// ==============================================
-// DESCRIPTOGRAFAR PLAYBACK
+// FUNÇÃO DE DESCRIPTOGRAFIA DO PLAYBACK
 // ==============================================
 
 function decryptPlayback(playback) {
@@ -357,7 +337,33 @@ function decryptPlayback(playback) {
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL getStreams
+// CONVERTER IMDb PARA TMDb
+// ==============================================
+
+function isImdbId(id) {
+  return typeof id === "string" && id.toLowerCase().startsWith("tt");
+}
+
+function convertImdbToTmdb(imdbId, mediaType) {
+  return __async(this, null, function* () {
+    try {
+      const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+      const response = yield fetch(url, {
+        headers: { "User-Agent": HEADERS["User-Agent"], "Accept": "application/json" }
+      });
+      if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
+      const data = yield response.json();
+      const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
+      if (results && results.length > 0) return { success: true, tmdbId: results[0].id };
+      return { success: false, error: "Nenhum resultado encontrado" };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+}
+
+// ==============================================
+// FUNÇÃO PRINCIPAL getStreams (COM FINGERPRINT COMPLETO)
 // ==============================================
 
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -371,81 +377,112 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
 
     log(`🔍 [0/7] Iniciando busca`, `${mediaType} ${tmdbId}`);
 
+    // Converter IMDb se necessário
     if (isImdbId(tmdbId)) {
-      log(`🔄 [0/7] IMDb detectado: ${tmdbId}`, "Convertendo...");
+      log(`🔄 [0/7] IMDb detectado: ${tmdbId}`, "Convertendo para TMDb...");
       const conversion = yield convertImdbToTmdb(tmdbId, mediaType);
       if (conversion.success) {
         finalTmdbId = conversion.tmdbId;
-        log(`✅ [0/7] Convertido: ${finalTmdbId}`, "Sucesso");
+        log(`✅ [0/7] Convertido: ${tmdbId} → ${finalTmdbId}`, "Conversão bem-sucedida");
       } else {
-        log(`❌ [0/7] Falha na conversão: ${conversion.error}`, "Erro");
+        log(`❌ [0/7] Falha na conversão: ${conversion.error}`, conversion.error);
         return streams;
       }
     } else if (typeof tmdbId === "string" && !isNaN(parseInt(tmdbId))) {
       finalTmdbId = parseInt(tmdbId);
+      log(`✅ [0/7] ID convertido: ${tmdbId} → ${finalTmdbId}`, "String para número");
     }
 
     const seasonNum = mediaType === "movie" ? 1 : (season || 1);
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
 
+    // 1. Obter Byse ID do HTML
     try {
-      // 1. Obter Byse ID
       const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${finalTmdbId}` : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
-      log(`📡 [1/7] Buscando HTML`, pomfyUrl);
+      log(`📡 [1/7] Buscando HTML do Pomfy`, pomfyUrl);
+      
       const response = yield fetch(pomfyUrl, { headers: HEADERS });
       if (!response.ok) return streams;
+      
       const html = yield response.text();
+      log(`✅ [1/7] HTML recebido (${html.length} bytes)`, "Página carregada");
+      
       const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
       if (!linkMatch) {
-        log(`❌ [2/7] Link não encontrado`, "Erro");
+        log(`❌ [2/7] Link não encontrado no HTML`, "Conteúdo indisponível");
         return streams;
       }
+      
       const byseUrl = linkMatch[1];
       const byseId = byseUrl.split("/").pop();
+      const embedDomain = new URL(byseUrl).origin;
       log(`✅ [2/7] Byse ID: ${byseId}`, byseUrl);
 
-      // 2. Obter Detalhes
+      // 2. Obter Detalhes do Embed
       const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
+      log(`📡 [3/7] Buscando detalhes do vídeo`, detailsUrl);
+      
       const detailsRes = yield fetch(detailsUrl, {
         headers: { "referer": byseUrl, "x-embed-origin": "api.pomfy.stream", "user-agent": USER_AGENT, "Cookie": COOKIE }
       });
       if (!detailsRes.ok) return streams;
+      
       const details = yield detailsRes.json();
       const embedUrl = details.embed_frame_url;
-      if (!embedUrl) return streams;
       const playerDomain = new URL(embedUrl).origin;
       log(`✅ [3/7] Embed URL obtida`, embedUrl);
 
-      // 3. Gerar Fingerprint (Lógica Nova e Funcional)
-      const fingerprint = generateFingerprint();
-      log(`🔐 [5/7] Fingerprint gerado`, `ID: ${fingerprint.viewer_id.substring(0,8)}`);
+      // 3. Obter Challenge para Fingerprint
+      log(`🔐 [4/7] Solicitando Challenge`, playerDomain);
+      const challengeUrl = `${playerDomain}/api/videos/${byseId}/embed/challenge`;
+      const challengeRes = yield fetch(challengeUrl, {
+        method: "POST",
+        headers: { "origin": playerDomain, "referer": embedUrl, "user-agent": USER_AGENT }
+      });
+      if (!challengeRes.ok) return streams;
+      const challenge = yield challengeRes.json();
+      
+      // 4. Gerar Fingerprint Realista
+      const viewerId = generateUUID();
+      const deviceId = generateUUID();
+      // Simulamos uma assinatura e chave pública
+      const publicKey = { kty: "OKP", crv: "Ed25519", x: generateRandomHex(43), kid: generateUUID() };
+      const signature = generateRandomHex(86);
+      
+      const fingerprintPayload = generateFingerprintPayload(viewerId, deviceId, challenge.challenge_id, challenge.nonce, signature, publicKey);
+      log(`✅ [5/7] Fingerprint gerado com Challenge`, `ID: ${challenge.challenge_id.substring(0,8)}`);
 
-      // 4. Playback
+      // 5. Solicitar Playback
       const playbackUrl = `${playerDomain}/api/videos/${byseId}/embed/playback`;
-      log(`🎬 [6/7] Solicitando Playback`, playbackUrl);
+      log(`🎬 [6/7] Solicitando playback`, playbackUrl);
+      
       const playbackRes = yield fetch(playbackUrl, {
         method: "POST",
         headers: { "content-type": "application/json", "origin": playerDomain, "referer": embedUrl, "user-agent": USER_AGENT },
-        body: JSON.stringify({ fingerprint: fingerprint })
+        body: JSON.stringify({ fingerprint: fingerprintPayload })
       });
-      if (!playbackRes.ok) {
-        log(`❌ [6/7] Playback Negado: HTTP ${playbackRes.status}`, "Erro");
-        return streams;
-      }
+      if (!playbackRes.ok) return streams;
       const playbackData = yield playbackRes.json();
       
-      // 5. Descriptografar
+      // 6. Descriptografar
       log(`🔓 [7/7] Descriptografando`, "AES-256-GCM");
       const decryptResult = decryptPlayback(playbackData.playback);
       if (decryptResult.success) {
-        log(`🎉 SUCESSO! Stream encontrado`, `1080p`, decryptResult.url);
+        const title = mediaType === "movie"
+          ? `Filme ${finalTmdbId}`
+          : `S${seasonNum.toString().padStart(2, "0")}E${episodeNum.toString().padStart(2, "0")}`;
+        
+        log(`🎉 SUCESSO! Stream encontrado`, `Qualidade: 1080p`, decryptResult.url);
+        // Adiciona o stream final real
         streams.push({
           name: "Pomfy",
-          title: "Multi-Qualidade",
+          title: title,
           url: decryptResult.url,
           quality: 1080,
           headers: { "User-Agent": USER_AGENT, "Referer": embedUrl }
         });
+      } else {
+        log(`❌ [7/7] Falha na descriptografia: ${decryptResult.error}`, decryptResult.error);
       }
 
     } catch (e) { log(`❌ ERRO`, e.message); }
