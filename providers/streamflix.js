@@ -1,6 +1,6 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Versão Servidor/Nuvio: Fingerprint simplificado e resiliente
+ * Versão Estável Consolidada: Base Original + Fingerprint Otimizado
  * SEM dependências de Buffer ou crypto (100% manual)
  */
 
@@ -26,13 +26,17 @@ const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const COOKIE = "SITE_TOTAL_ID=aTYqe6GU65PNmeCXpelwJwAAAMi; __dtsu=104017651574995957BEB724C6373F9E; __cc_id=a44d1e52993b9c2Oaaf40eba24989a06";
 
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36";
 
 const HEADERS = {
   "User-Agent": USER_AGENT,
   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,image/apng,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Language": "pt-BR,pt;q=0.9",
   "Referer": "https://pomfy.online/",
+  "Sec-Fetch-Dest": "iframe",
+  "Sec-Fetch-Mode": "navigate",
+  "Sec-Fetch-Site": "cross-site",
+  "Upgrade-Insecure-Requests": "1",
   "Cookie": COOKIE
 };
 
@@ -228,8 +232,15 @@ class AES256GCM_Manual {
 }
 
 // ==============================================
-// GERAÇÃO DE FINGERPRINT (VERSÃO SERVIDOR)
+// GERAÇÃO DE FINGERPRINT OTIMIZADO
 // ==============================================
+
+function generateRandomHex(length) {
+  const chars = "abcdef0123456789";
+  let result = "";
+  for (let i = 0; i < length; i++) { result += chars.charAt(Math.floor(Math.random() * chars.length)); }
+  return result;
+}
 
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -239,8 +250,8 @@ function generateUUID() {
 }
 
 /**
- * Fingerprint simplificado para ambiente de servidor.
- * Evita dados de hardware complexos que podem denunciar o Data Center.
+ * Fingerprint aprimorado para garantir que os links funcionem.
+ * Inclui dados de entropia e token estruturado.
  */
 function generateFingerprint() {
   const viewerId = generateUUID();
@@ -250,7 +261,7 @@ function generateFingerprint() {
   const payload = {
     viewer_id: viewerId,
     device_id: deviceId,
-    confidence: 0.9,
+    confidence: 0.93,
     iat: timestamp,
     exp: timestamp + 600
   };
@@ -260,14 +271,29 @@ function generateFingerprint() {
     token: token,
     viewer_id: viewerId,
     device_id: deviceId,
-    confidence: 0.9,
+    confidence: 0.93,
     client: {
       user_agent: USER_AGENT,
-      platform: "Windows",
-      languages: ["en-US", "en"],
-      timezone: "UTC"
+      architecture: "arm",
+      bitness: "64",
+      platform: "Android",
+      platform_version: "10",
+      model: "K",
+      pixel_ratio: 2.75,
+      screen_width: 393,
+      screen_height: 851,
+      color_depth: 24,
+      languages: ["pt-BR", "pt"],
+      timezone: "America/Sao_Paulo",
+      canvas_hash: "a" + generateRandomHex(31),
+      audio_hash: "b" + generateRandomHex(31)
     },
-    attributes: { entropy: 0.5 }
+    storage: {
+      cookie: viewerId,
+      local_storage: viewerId,
+      indexed_db: `${viewerId}:${deviceId}`
+    },
+    attributes: { entropy: 0.93 }
   };
 }
 
@@ -283,13 +309,13 @@ function convertImdbToTmdb(imdbId, mediaType) {
   return __async(this, null, function* () {
     try {
       const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-      const response = yield fetch(url, { headers: { "User-Agent": USER_AGENT } });
-      if (!response.ok) return { success: false };
+      const response = yield fetch(url, { headers: { "User-Agent": USER_AGENT, "Accept": "application/json" } });
+      if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
       const data = yield response.json();
       const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
       if (results && results.length > 0) return { success: true, tmdbId: results[0].id };
-      return { success: false };
-    } catch (error) { return { success: false }; }
+      return { success: false, error: "Nenhum resultado encontrado" };
+    } catch (error) { return { success: false, error: error.message }; }
   });
 }
 
@@ -306,14 +332,14 @@ function decryptPlayback(playback) {
     const cipher = new AES256GCM_Manual(key);
     const decrypted = cipher.decrypt(iv, ciphertext);
     const videoData = JSON.parse(decrypted);
-    let m3u8Url = videoData.url || (videoData.sources && videoData.sources[0] && videoData.sources[0].url);
+    let m3u8Url = videoData.url || (videoData.sources && videoData.sources[0] && videoData.sources[0].url) || (videoData.data && videoData.data.sources && videoData.data.sources[0].url);
     if (m3u8Url) return { success: true, url: m3u8Url.replace(/\\u0026/g, '&') };
-    return { success: false };
-  } catch (e) { return { success: false }; }
+    return { success: false, error: "URL não encontrada" };
+  } catch (e) { return { success: false, error: e.message }; }
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL
+// FUNÇÃO PRINCIPAL getStreams
 // ==============================================
 
 function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -321,10 +347,24 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     const streams = [];
     let finalTmdbId = tmdbId;
 
+    const log = (name, title, url = "debug://log") => {
+      streams.push({ name, title, url, quality: 1080, headers: HEADERS });
+    };
+
+    log(`🔍 [0/7] Iniciando busca`, `${mediaType} ${tmdbId}`);
+
     if (isImdbId(tmdbId)) {
+      log(`🔄 [0/7] IMDb detectado`, "Convertendo...");
       const conversion = yield convertImdbToTmdb(tmdbId, mediaType);
-      if (conversion.success) finalTmdbId = conversion.tmdbId;
-      else return streams;
+      if (conversion.success) {
+        finalTmdbId = conversion.tmdbId;
+        log(`✅ [0/7] Convertido: ${finalTmdbId}`, "Sucesso");
+      } else {
+        log(`❌ [0/7] Falha na conversão`, "Erro");
+        return streams;
+      }
+    } else if (typeof tmdbId === "string" && !isNaN(parseInt(tmdbId))) {
+      finalTmdbId = parseInt(tmdbId);
     }
 
     const seasonNum = mediaType === "movie" ? 1 : (season || 1);
@@ -332,36 +372,50 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
 
     try {
       const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${finalTmdbId}` : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
+      log(`📡 [1/7] Buscando HTML`, pomfyUrl);
       const response = yield fetch(pomfyUrl, { headers: HEADERS });
       if (!response.ok) return streams;
       const html = yield response.text();
       const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
-      if (!linkMatch) return streams;
-      
+      if (!linkMatch) {
+        log(`❌ [2/7] Link não encontrado`, "Erro");
+        return streams;
+      }
       const byseUrl = linkMatch[1];
       const byseId = byseUrl.split("/").pop();
-      
+      log(`✅ [2/7] Byse ID: ${byseId}`, byseUrl);
+
       const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
       const detailsRes = yield fetch(detailsUrl, {
-        headers: { "referer": byseUrl, "user-agent": USER_AGENT, "Cookie": COOKIE }
+        headers: { "referer": byseUrl, "x-embed-origin": "api.pomfy.stream", "user-agent": USER_AGENT, "Cookie": COOKIE }
       });
       if (!detailsRes.ok) return streams;
       const details = yield detailsRes.json();
       const embedUrl = details.embed_frame_url;
       if (!embedUrl) return streams;
       const playerDomain = new URL(embedUrl).origin;
+      log(`✅ [3/7] Embed URL obtida`, embedUrl);
+
+      const fingerprint = generateFingerprint();
+      log(`🔐 [5/7] Fingerprint gerado`, `ID: ${fingerprint.viewer_id.substring(0,8)}`);
 
       const playbackUrl = `${playerDomain}/api/videos/${byseId}/embed/playback`;
+      log(`🎬 [6/7] Solicitando Playback`, "Processando...");
       const playbackRes = yield fetch(playbackUrl, {
         method: "POST",
         headers: { "content-type": "application/json", "origin": playerDomain, "referer": embedUrl, "user-agent": USER_AGENT },
-        body: JSON.stringify({ fingerprint: generateFingerprint() })
+        body: JSON.stringify({ fingerprint: fingerprint })
       });
-      if (!playbackRes.ok) return streams;
+      if (!playbackRes.ok) {
+        log(`❌ [6/7] Playback Negado: HTTP ${playbackRes.status}`, "Erro");
+        return streams;
+      }
       const playbackData = yield playbackRes.json();
       
+      log(`🔓 [7/7] Descriptografando`, "Processando...");
       const decryptResult = decryptPlayback(playbackData.playback);
       if (decryptResult.success) {
+        log(`🎉 SUCESSO! Stream encontrado`, `1080p`, decryptResult.url);
         streams.push({
           name: "Pomfy",
           title: "Multi-Qualidade",
@@ -370,7 +424,8 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
           headers: { "User-Agent": USER_AGENT, "Referer": embedUrl }
         });
       }
-    } catch (e) {}
+
+    } catch (e) { log(`❌ ERRO`, e.message); }
     return streams;
   });
 }
