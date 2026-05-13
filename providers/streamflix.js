@@ -1,6 +1,6 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Versão com DEBUG de TIMESTAMP em STREAMS
+ * Versão com DEBUG em STREAMS e parâmetro t
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -239,7 +239,6 @@ class AES256GCM_Manual {
 // ==============================================
 
 function generateFingerprint() {
-  // FINGERPRINT FIXO - Funciona no Termux
   const viewerId = "bed4fadd25c8dcdcaced26e318c3be5a";
   const deviceId = "b69c7e41fe010d4445b827dd95aa89fc";
   const timestamp = Math.floor(Date.now() / 1000);
@@ -298,7 +297,7 @@ function decryptPlayback(playback) {
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL getStreams COM DEBUG DE TIMESTAMP
+// FUNÇÃO PRINCIPAL getStreams COM DEBUG EM STREAMS
 // ==============================================
 
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -307,21 +306,18 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
 
   // ========== DEBUG INICIAL ==========
   streams.push({
-    name: `🔍 [0/10] Iniciando busca`,
+    name: `🔍 [0/9] Iniciando busca`,
     title: `${mediaType} ${tmdbId} S${season || 1}E${episode || 1}`,
     url: `debug://start`,
     quality: 1080,
     headers: HEADERS
   });
 
-  // ========== DEBUG DO TIMESTAMP ==========
-  const now = Math.floor(Date.now() / 1000);
-  const timezoneOffset = new Date().getTimezoneOffset();
-  const timezoneName = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  
+  // ========== TIMESTAMP INICIAL ==========
+  const startTimestamp = Math.floor(Date.now() / 1000);
   streams.push({
-    name: `⏰ [0/10] Timestamp atual: ${now}`,
-    title: `Timezone: ${timezoneName} (offset: ${timezoneOffset} minutos)`,
+    name: `⏰ [0/9] Timestamp inicial: ${startTimestamp}`,
+    title: `Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
     url: `debug://timestamp`,
     quality: 1080,
     headers: HEADERS
@@ -330,7 +326,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
   // Converter IMDb se necessário
   if (isImdbId(tmdbId)) {
     streams.push({
-      name: `🔄 [0/10] IMDb detectado: ${tmdbId}`,
+      name: `🔄 [0/9] IMDb detectado: ${tmdbId}`,
       title: "Convertendo para TMDb...",
       url: `debug://converting`,
       quality: 1080,
@@ -341,7 +337,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     if (conversion.success) {
       finalTmdbId = conversion.tmdbId;
       streams.push({
-        name: `✅ [0/10] Convertido: ${tmdbId} → ${finalTmdbId}`,
+        name: `✅ [0/9] Convertido: ${tmdbId} → ${finalTmdbId}`,
         title: "Conversão bem-sucedida",
         url: `debug://converted`,
         quality: 1080,
@@ -349,7 +345,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       });
     } else {
       streams.push({
-        name: `❌ [0/10] Falha na conversão: ${conversion.error}`,
+        name: `❌ [0/9] Falha na conversão: ${conversion.error}`,
         title: conversion.error,
         url: `debug://conversion-failed`,
         quality: 1080,
@@ -360,7 +356,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
   } else if (typeof tmdbId === "string" && !isNaN(parseInt(tmdbId))) {
     finalTmdbId = parseInt(tmdbId);
     streams.push({
-      name: `✅ [0/10] ID convertido: ${tmdbId} → ${finalTmdbId}`,
+      name: `✅ [0/9] ID convertido: ${tmdbId} → ${finalTmdbId}`,
       title: "String para número",
       url: `debug://id-converted`,
       quality: 1080,
@@ -372,7 +368,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
   const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
 
   streams.push({
-    name: `📡 [1/10] Buscando HTML do Pomfy`,
+    name: `📡 [1/9] Buscando HTML do Pomfy`,
     title: `${mediaType} ${finalTmdbId} S${seasonNum}E${episodeNum}`,
     url: `debug://fetching-html`,
     quality: 1080,
@@ -385,7 +381,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
 
     streams.push({
-      name: `🌐 [1/10] URL: ${pomfyUrl}`,
+      name: `🌐 [1/9] URL: ${pomfyUrl}`,
       title: "Requisição HTTP",
       url: `debug://url`,
       quality: 1080,
@@ -395,7 +391,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const response = await fetch(pomfyUrl, { headers: HEADERS });
 
     streams.push({
-      name: `📊 [1/10] HTTP ${response.status}`,
+      name: `📊 [1/9] HTTP ${response.status}`,
       title: response.ok ? "OK" : "FALHOU",
       url: `debug://http-status`,
       quality: 1080,
@@ -407,7 +403,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const html = await response.text();
 
     streams.push({
-      name: `✅ [1/10] HTML recebido (${html.length} bytes)`,
+      name: `✅ [1/9] HTML recebido (${html.length} bytes)`,
       title: "Página carregada",
       url: `debug://html-loaded`,
       quality: 1080,
@@ -417,7 +413,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
     if (!linkMatch) {
       streams.push({
-        name: `❌ [2/10] Link não encontrado no HTML`,
+        name: `❌ [2/9] Link não encontrado no HTML`,
         title: "Conteúdo indisponível",
         url: `debug://no-link`,
         quality: 1080,
@@ -430,7 +426,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const byseId = byseUrl.split("/").pop();
 
     streams.push({
-      name: `✅ [2/10] Byse ID: ${byseId}`,
+      name: `✅ [2/9] Byse ID: ${byseId}`,
       title: byseUrl,
       url: `debug://byse-id`,
       quality: 1080,
@@ -440,7 +436,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
 
     streams.push({
-      name: `📡 [3/10] Buscando detalhes do vídeo`,
+      name: `📡 [3/9] Buscando detalhes do vídeo`,
       title: detailsUrl,
       url: `debug://fetching-details`,
       quality: 1080,
@@ -459,7 +455,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     });
 
     streams.push({
-      name: `📊 [3/10] Detalhes HTTP ${detailsResponse.status}`,
+      name: `📊 [3/9] Detalhes HTTP ${detailsResponse.status}`,
       title: detailsResponse.ok ? "OK" : "FALHOU",
       url: `debug://details-status`,
       quality: 1080,
@@ -472,7 +468,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const embedUrl = detailsData.embed_frame_url;
 
     streams.push({
-      name: `✅ [3/10] Embed URL obtida`,
+      name: `✅ [3/9] Embed URL obtida`,
       title: embedUrl,
       url: `debug://embed-url`,
       quality: 1080,
@@ -481,7 +477,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
 
     if (!embedUrl) {
       streams.push({
-        name: `❌ [3/10] embed_frame_url não encontrado`,
+        name: `❌ [3/9] embed_frame_url não encontrado`,
         title: "Resposta sem URL de embed",
         url: `debug://no-embed-url`,
         quality: 1080,
@@ -493,7 +489,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const embedDomain = new URL(embedUrl).origin;
 
     streams.push({
-      name: `🌐 [4/10] Embed domain: ${embedDomain}`,
+      name: `🌐 [4/9] Embed domain: ${embedDomain}`,
       title: "Domínio extraído",
       url: `debug://embed-domain`,
       quality: 1080,
@@ -504,14 +500,13 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const challengeUrl = `${embedDomain}/api/videos/access/challenge`;
 
     streams.push({
-      name: `🔐 [5/10] Solicitando Challenge`,
+      name: `🔐 [5/9] Solicitando Challenge`,
       title: challengeUrl,
       url: `debug://challenge`,
       quality: 1080,
       headers: HEADERS
     });
 
-    let challengeData = null;
     try {
       const challengeResponse = await fetch(challengeUrl, {
         method: 'POST',
@@ -524,26 +519,15 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       });
 
       streams.push({
-        name: `📊 [5/10] Challenge HTTP ${challengeResponse.status}`,
+        name: `📊 [5/9] Challenge HTTP ${challengeResponse.status}`,
         title: challengeResponse.ok ? "OK" : "FALHOU",
         url: `debug://challenge-status`,
         quality: 1080,
         headers: HEADERS
       });
-
-      if (challengeResponse.ok) {
-        challengeData = await challengeResponse.json();
-        streams.push({
-          name: `✅ [5/10] Challenge obtido`,
-          title: `ID: ${challengeData.challenge_id?.substring(0, 16)}...`,
-          url: `debug://challenge-success`,
-          quality: 1080,
-          headers: HEADERS
-        });
-      }
     } catch (err) {
       streams.push({
-        name: `⚠️ [5/10] Challenge erro: ${err.message}`,
+        name: `⚠️ [5/9] Challenge erro: ${err.message}`,
         title: "Continuando sem challenge",
         url: `debug://challenge-error`,
         quality: 1080,
@@ -554,8 +538,8 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     // ========== TIMESTAMP ANTES DO FINGERPRINT ==========
     const timestampBefore = Math.floor(Date.now() / 1000);
     streams.push({
-      name: `⏰ [6/10] Timestamp antes do fingerprint: ${timestampBefore}`,
-      title: `Será usado no iat do token`,
+      name: `⏰ [6/9] Timestamp antes do fingerprint: ${timestampBefore}`,
+      title: `Diferença do inicial: ${timestampBefore - startTimestamp}s`,
       url: `debug://timestamp-before`,
       quality: 1080,
       headers: HEADERS
@@ -564,88 +548,61 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     // Fingerprint
     const fingerprint = generateFingerprint();
     
-    // ========== TIMESTAMP DEPOIS DO FINGERPRINT ==========
-    const timestampAfter = Math.floor(Date.now() / 1000);
+    // ========== DEBUG DO FINGERPRINT ==========
     streams.push({
-      name: `⏰ [6/10] Timestamp depois do fingerprint: ${timestampAfter}`,
-      title: `Diferença: ${timestampAfter - timestampBefore}s`,
-      url: `debug://timestamp-after`,
-      quality: 1080,
-      headers: HEADERS
-    });
-    
-    // ========== DEBUG DO FINGERPRINT COMPLETO ==========
-    streams.push({
-      name: `🔐 [6/10] Fingerprint gerado`,
-      title: `viewer_id: ${fingerprint.viewer_id}`,
+      name: `🔐 [6/9] Fingerprint viewer_id: ${fingerprint.viewer_id}`,
+      title: "ID do visualizador",
       url: `debug://fingerprint-viewer`,
       quality: 1080,
       headers: HEADERS
     });
     
     streams.push({
-      name: `🔐 [6/10] Fingerprint device_id`,
-      title: `device_id: ${fingerprint.device_id}`,
+      name: `🔐 [6/9] Fingerprint device_id: ${fingerprint.device_id}`,
+      title: "ID do dispositivo",
       url: `debug://fingerprint-device`,
       quality: 1080,
       headers: HEADERS
     });
     
-    // Extrair o payload do token para ver o iat
+    // Extrair e mostrar o iat do token
     try {
       const tokenBytes = base64ToBytes(fingerprint.token);
       const tokenJson = utf8BytesToString(tokenBytes);
       const tokenPayload = JSON.parse(tokenJson);
       streams.push({
-        name: `🔐 [6/10] Token iat: ${tokenPayload.iat}`,
-        title: `Token exp: ${tokenPayload.exp}`,
+        name: `🔐 [6/9] Token iat: ${tokenPayload.iat}`,
+        title: `exp: ${tokenPayload.exp} (expira em ${tokenPayload.exp - tokenPayload.iat}s)`,
         url: `debug://token-iat`,
         quality: 1080,
         headers: HEADERS
       });
       
-      const now2 = Math.floor(Date.now() / 1000);
+      const now = Math.floor(Date.now() / 1000);
       streams.push({
-        name: `⏰ [6/10] Agora: ${now2}`,
-        title: `Diferença iat - agora: ${now2 - tokenPayload.iat}s`,
+        name: `⏰ [6/9] Agora: ${now}`,
+        title: `Diferença iat - agora: ${now - tokenPayload.iat}s`,
         url: `debug://token-diff`,
         quality: 1080,
         headers: HEADERS
       });
     } catch(e) {
       streams.push({
-        name: `⚠️ [6/10] Erro ao parsear token: ${e.message}`,
-        title: fingerprint.token?.substring(0, 100),
-        url: `debug://token-parse-error`,
+        name: `⚠️ [6/9] Token: ${fingerprint.token.substring(0, 50)}...`,
+        title: "Token (primeiros 50 chars)",
+        url: `debug://fingerprint-token`,
         quality: 1080,
         headers: HEADERS
       });
     }
-    
-    streams.push({
-      name: `🔐 [6/10] Fingerprint token (primeiros 100)`,
-      title: fingerprint.token?.substring(0, 100) + "...",
-      url: `debug://fingerprint-token`,
-      quality: 1080,
-      headers: HEADERS
-    });
 
     // Playback Request
     const playbackUrl = `${embedDomain}/api/videos/${byseId}/embed/playback`;
 
     streams.push({
-      name: `🎬 [7/10] Solicitando playback`,
+      name: `🎬 [7/9] Solicitando playback`,
       title: playbackUrl,
       url: `debug://requesting-playback`,
-      quality: 1080,
-      headers: HEADERS
-    });
-
-    const requestTime = Math.floor(Date.now() / 1000);
-    streams.push({
-      name: `⏰ [7/10] Hora da requisição: ${requestTime}`,
-      title: "",
-      url: `debug://request-time`,
       quality: 1080,
       headers: HEADERS
     });
@@ -665,17 +622,8 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       body: JSON.stringify({ fingerprint: fingerprint })
     });
 
-    const responseTime = Math.floor(Date.now() / 1000);
     streams.push({
-      name: `⏰ [7/10] Resposta recebida: ${responseTime}`,
-      title: `Tempo de resposta: ${responseTime - requestTime}s`,
-      url: `debug://response-time`,
-      quality: 1080,
-      headers: HEADERS
-    });
-
-    streams.push({
-      name: `📊 [7/10] Playback HTTP ${playbackResponse.status}`,
+      name: `📊 [7/9] Playback HTTP ${playbackResponse.status}`,
       title: playbackResponse.ok ? "OK" : "FALHOU",
       url: `debug://playback-status`,
       quality: 1080,
@@ -685,7 +633,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     if (!playbackResponse.ok) {
       const errorText = await playbackResponse.text();
       streams.push({
-        name: `❌ [7/10] Playback falhou: ${playbackResponse.status}`,
+        name: `❌ [7/9] Playback falhou: ${playbackResponse.status}`,
         title: errorText?.substring(0, 200) || "Sem detalhes",
         url: `debug://playback-error`,
         quality: 1080,
@@ -697,8 +645,8 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const playbackData = await playbackResponse.json();
 
     streams.push({
-      name: `✅ [7/10] Playback recebido`,
-      title: `has key_parts: ${!!playbackData.playback?.key_parts}`,
+      name: `✅ [7/9] Playback recebido`,
+      title: `has key_parts: ${!!(playbackData.playback && playbackData.playback.key_parts)}`,
       url: `debug://playback-received`,
       quality: 1080,
       headers: HEADERS
@@ -706,7 +654,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
 
     if (!playbackData.playback) {
       streams.push({
-        name: `❌ [7/10] Playback sem dados`,
+        name: `❌ [7/9] Playback sem dados`,
         title: "Objeto playback não encontrado",
         url: `debug://no-playback-data`,
         quality: 1080,
@@ -715,9 +663,34 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       return streams;
     }
 
+    // ========== DEBUG DO PAYLOAD ==========
+    streams.push({
+      name: `📦 [7/9] Playback IV: ${playbackData.playback.iv}`,
+      title: "Vetor de inicialização",
+      url: `debug://playback-iv`,
+      quality: 1080,
+      headers: HEADERS
+    });
+    
+    streams.push({
+      name: `📦 [7/9] Playback key_parts: ${playbackData.playback.key_parts.length} partes`,
+      title: `Parte 0: ${playbackData.playback.key_parts[0].substring(0, 20)}...`,
+      url: `debug://playback-keyparts`,
+      quality: 1080,
+      headers: HEADERS
+    });
+    
+    streams.push({
+      name: `📦 [7/9] Playback payload size: ${playbackData.playback.payload.length} caracteres`,
+      title: "Payload criptografado",
+      url: `debug://playback-payload-size`,
+      quality: 1080,
+      headers: HEADERS
+    });
+
     // Decrypt
     streams.push({
-      name: `🔓 [8/10] Descriptografando payload AES-256-GCM`,
+      name: `🔓 [8/9] Descriptografando payload AES-256-GCM`,
       title: "Processando...",
       url: `debug://decrypting`,
       quality: 1080,
@@ -728,7 +701,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
 
     if (!decryptResult.success) {
       streams.push({
-        name: `❌ [8/10] Falha na descriptografia: ${decryptResult.error}`,
+        name: `❌ [8/9] Falha na descriptografia: ${decryptResult.error}`,
         title: decryptResult.error,
         url: `debug://decrypt-failed`,
         quality: 1080,
@@ -738,9 +711,39 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     }
 
     streams.push({
-      name: `✅ [8/10] Payload decifrado com sucesso!`,
+      name: `✅ [8/9] Payload decifrado com sucesso!`,
       title: "URL extraída",
       url: `debug://decrypt-success`,
+      quality: 1080,
+      headers: HEADERS
+    });
+
+    // ========== DEBUG DA URL COMPLETA E PARÂMETRO t ==========
+    const urlParams = new URL(decryptResult.url);
+    const tParam = urlParams.searchParams.get('t') || 'NÃO ENCONTRADO';
+    const sParam = urlParams.searchParams.get('s') || 'NÃO ENCONTRADO';
+    const eParam = urlParams.searchParams.get('e') || 'NÃO ENCONTRADO';
+    
+    streams.push({
+      name: `🔗 [9/9] Parâmetro t (token): ${tParam.substring(0, 30)}...`,
+      title: `t size: ${tParam.length} caracteres`,
+      url: `debug://param-t`,
+      quality: 1080,
+      headers: HEADERS
+    });
+    
+    streams.push({
+      name: `🔗 [9/9] Parâmetro s (timestamp): ${sParam}`,
+      title: `e (expira em): ${eParam} segundos`,
+      url: `debug://param-s`,
+      quality: 1080,
+      headers: HEADERS
+    });
+    
+    streams.push({
+      name: `🔗 [9/9] URL completa:`,
+      title: decryptResult.url,
+      url: decryptResult.url,
       quality: 1080,
       headers: HEADERS
     });
@@ -749,7 +752,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       ? `Filme ${finalTmdbId}`
       : `S${seasonNum.toString().padStart(2, "0")}E${episodeNum.toString().padStart(2, "0")}`;
 
-    // ========== URL COMPLETA ==========
+    // ========== STREAM FINAL ==========
     streams.push({
       name: `🎉 SUCESSO! Stream encontrado`,
       title: title,
@@ -761,6 +764,15 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
         "Accept": "*/*"
       }
     });
+
+    // Log no console
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`🎬 URL COMPLETA:`);
+    console.log(`${decryptResult.url}`);
+    console.log(`\n🔑 PARÂMETRO t: ${tParam}`);
+    console.log(`⏰ PARÂMETRO s: ${sParam}`);
+    console.log(`⏱️ PARÂMETRO e: ${eParam}`);
+    console.log(`${'='.repeat(80)}\n`);
 
   } catch (error) {
     streams.push({
