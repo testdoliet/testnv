@@ -1,6 +1,6 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Versão Nuvio-Resiliente: Token de Baixa Entropia
+ * Versão Debug Detalhado: Respostas completas no campo URL
  * SEM dependências de Buffer ou crypto (100% manual)
  */
 
@@ -242,9 +242,6 @@ function generateUUID() {
   });
 }
 
-/**
- * Fingerprint de baixa entropia: não denuncia o servidor e foca no token.
- */
 function generateFingerprint() {
   const viewerId = generateUUID();
   const deviceId = generateUUID();
@@ -253,14 +250,12 @@ function generateFingerprint() {
   const payload = {
     viewer_id: viewerId,
     device_id: deviceId,
-    confidence: 0.9,
+    confidence: 0.93,
     iat: timestamp,
     exp: timestamp + 3600
   };
   const token = bytesToBase64(stringToUtf8Bytes(JSON.stringify(payload)));
 
-  // Retorna apenas o essencial que o código antigo enviava, 
-  // mas com o token estruturado para liberar o stream.
   return {
     token: token,
     viewer_id: viewerId,
@@ -281,12 +276,12 @@ function convertImdbToTmdb(imdbId, mediaType) {
     try {
       const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
       const response = yield fetch(url, { headers: { "User-Agent": USER_AGENT, "Accept": "application/json" } });
-      if (!response.ok) return { success: false };
+      if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
       const data = yield response.json();
       const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
       if (results && results.length > 0) return { success: true, tmdbId: results[0].id };
-      return { success: false };
-    } catch (error) { return { success: false }; }
+      return { success: false, error: "Nenhum resultado encontrado" };
+    } catch (error) { return { success: false, error: error.message }; }
   });
 }
 
@@ -305,8 +300,8 @@ function decryptPlayback(playback) {
     const videoData = JSON.parse(decrypted);
     let m3u8Url = videoData.url || (videoData.sources && videoData.sources[0] && videoData.sources[0].url) || (videoData.data && videoData.data.sources && videoData.data.sources[0].url);
     if (m3u8Url) return { success: true, url: m3u8Url.replace(/\\u0026/g, '&') };
-    return { success: false };
-  } catch (e) { return { success: false }; }
+    return { success: false, error: "URL não encontrada" };
+  } catch (e) { return { success: false, error: e.message }; }
 }
 
 // ==============================================
@@ -318,40 +313,56 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
     const streams = [];
     let finalTmdbId = tmdbId;
 
-    const log = (name, title, url = "debug://log") => {
-      streams.push({ name, title, url, quality: 1080, headers: HEADERS });
+    const log = (name, title, response = "Sem dados") => {
+      let content = typeof response === "object" ? JSON.stringify(response) : response;
+      streams.push({ name, title, url: "debug://log?data=" + encodeURIComponent(content), quality: 1080, headers: HEADERS });
     };
+
+    log(`🔍 [0/7] Iniciando`, `${mediaType} ${tmdbId}`);
 
     if (isImdbId(tmdbId)) {
       const conversion = yield convertImdbToTmdb(tmdbId, mediaType);
-      if (conversion.success) finalTmdbId = conversion.tmdbId;
-      else return streams;
+      if (conversion.success) {
+        finalTmdbId = conversion.tmdbId;
+        log(`✅ [0/7] TMDb ID`, `ID: ${finalTmdbId}`);
+      } else {
+        log(`❌ [0/7] TMDb Erro`, conversion.error);
+        return streams;
+      }
     }
 
     const seasonNum = mediaType === "movie" ? 1 : (season || 1);
     const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
 
     try {
+      // 1. Pomfy HTML
       const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${finalTmdbId}` : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
       const response = yield fetch(pomfyUrl, { headers: HEADERS });
-      if (!response.ok) return streams;
       const html = yield response.text();
+      log(`📡 [1/7] Pomfy HTML`, html.substring(0, 500) + "...");
+
       const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
-      if (!linkMatch) return streams;
-      
+      if (!linkMatch) {
+        log(`❌ [2/7] Byse Link Erro`, "Link não encontrado no HTML");
+        return streams;
+      }
       const byseUrl = linkMatch[1];
       const byseId = byseUrl.split("/").pop();
-      
+      log(`✅ [2/7] Byse ID`, byseId);
+
+      // 2. Embed Details
       const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
       const detailsRes = yield fetch(detailsUrl, {
         headers: { "referer": byseUrl, "x-embed-origin": "api.pomfy.stream", "user-agent": USER_AGENT, "Cookie": COOKIE }
       });
-      if (!detailsRes.ok) return streams;
-      const details = yield detailsRes.json();
-      const embedUrl = details.embed_frame_url;
+      const detailsData = yield detailsRes.json();
+      log(`✅ [3/7] Embed Details`, detailsData);
+
+      const embedUrl = detailsData.embed_frame_url;
       if (!embedUrl) return streams;
       const playerDomain = new URL(embedUrl).origin;
 
+      // 3. Playback (com Fingerprint)
       const fingerprint = generateFingerprint();
       const playbackUrl = `${playerDomain}/api/videos/${byseId}/embed/playback`;
       const playbackRes = yield fetch(playbackUrl, {
@@ -359,10 +370,19 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         headers: { "content-type": "application/json", "origin": playerDomain, "referer": embedUrl, "user-agent": USER_AGENT },
         body: JSON.stringify({ fingerprint: fingerprint })
       });
-      if (!playbackRes.ok) return streams;
-      const playbackData = yield playbackRes.json();
       
+      const playbackData = yield playbackRes.json();
+      log(`🎬 [6/7] Playback Resposta`, playbackData);
+
+      if (!playbackRes.ok) {
+        log(`❌ [6/7] Playback Falhou`, `HTTP ${playbackRes.status}`);
+        return streams;
+      }
+      
+      // 4. Decrypt
       const decryptResult = decryptPlayback(playbackData.playback);
+      log(`🔓 [7/7] Decrypt Resultado`, decryptResult);
+
       if (decryptResult.success) {
         streams.push({
           name: "Pomfy",
@@ -373,7 +393,7 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
         });
       }
 
-    } catch (e) {}
+    } catch (e) { log(`❌ ERRO CRÍTICO`, e.message); }
     return streams;
   });
 }
