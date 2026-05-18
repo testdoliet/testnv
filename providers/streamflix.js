@@ -1,6 +1,6 @@
 /**
  * Pomfy - Provider com Byse/9n8o
- * Com detecção REAL de qualidade (análise de bytes do vídeo)
+ * Atualizado com endpoint /api/play-token
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -23,7 +23,9 @@ var __async = (__this, __arguments, generator) => {
 const API_POMFY = "https://api.pomfy.stream";
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-const COOKIE = "SITE_TOTAL_ID=aTYqe6GU65PNmeCXpelwJwAAAMi; __dtsu=104017651574995957BEB724C6373F9E; __cc_id=a44d1e52993b9c2Oaaf40eba24989a06";
+
+// Cookie atualizado (pode precisar ser renovado periodicamente)
+const COOKIE = "cf_clearance=FY8zyQybVu2kflZRPEY.MK6_U4tb6fhgsHFcqL8ADrw-1778869729-1.2.1.1-QEpMO3YW7Bw5towDJ0vt.qryy45W8_ZNcfiIwZVFH8VxGfccA92JLE.AijYDUhFSQvlcvBCYFOIQBfR7AiAU62Z2oi.LcbauCXoBKFn7PZgFIctmHdbwAw1PEX6Cd3KSIE4iYDAek732vCD0AKZpj356_o087ffIzRotI1NaRK8w99XVw.9feR25y8bUDv3zRKAwmZOmWCc4EJ2Gl.t9G4av0mgASGgZCiBrikohLj0kWfe8ZZVyx2cimdouLH1CBth.AiPugowBvs4Ta0omNyc8qCD09QTfKAiOF7EGrY8J7XXyRC9M_ejoQplmjOoDFUo7d5qFqqWG.OsRZWzPVg";
 
 const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36";
 
@@ -235,17 +237,12 @@ class AES256GCM_Manual {
 }
 
 // ==============================================
-// DETECTOR DE QUALIDADE REAL (ANÁLISE DE BYTES)
+// DETECTOR DE QUALIDADE
 // ==============================================
 
 async function detectRealQuality(videoUrl, headers) {
   try {
-    // Baixa apenas os primeiros 5MB (como no CloudStream)
-    const rangeHeaders = {
-      ...headers,
-      "Range": "bytes=0-5242880"
-    };
-    
+    const rangeHeaders = { ...headers, "Range": "bytes=0-5242880" };
     const response = await fetch(videoUrl, { headers: rangeHeaders });
     if (!response.ok) return 1080;
     
@@ -253,40 +250,21 @@ async function detectRealQuality(videoUrl, headers) {
     let quality = 0;
     let resolution = "";
     
-    // Procura pelo padrão 'tkhd' (track header do MP4)
     for (let i = 0; i < bytes.length - 20; i++) {
-      // tkhd em hex: 0x74, 0x6B, 0x68, 0x64
       if (bytes[i] === 0x74 && bytes[i+1] === 0x6B && bytes[i+2] === 0x68 && bytes[i+3] === 0x64) {
-        
-        // Procura pela largura/altura (offsets 48-80 como no CloudStream)
         for (let offset = 48; offset <= 80; offset++) {
           if (i + offset + 8 <= bytes.length) {
-            // Lê largura (big-endian)
-            const widthFixed = ((bytes[i+offset] << 24) | 
-                               (bytes[i+offset+1] << 16) | 
-                               (bytes[i+offset+2] << 8) | 
-                               bytes[i+offset+3]);
-            
-            // Lê altura (big-endian)
-            const heightFixed = ((bytes[i+offset+4] << 24) | 
-                                (bytes[i+offset+5] << 16) | 
-                                (bytes[i+offset+6] << 8) | 
-                                bytes[i+offset+7]);
-            
-            // Converte de fixed-point (16.16)
+            const widthFixed = ((bytes[i+offset] << 24) | (bytes[i+offset+1] << 16) | (bytes[i+offset+2] << 8) | bytes[i+offset+3]);
+            const heightFixed = ((bytes[i+offset+4] << 24) | (bytes[i+offset+5] << 16) | (bytes[i+offset+6] << 8) | bytes[i+offset+7]);
             const width = Math.round(widthFixed / 65536.0);
             const height = Math.round(heightFixed / 65536.0);
             
-            // Verifica se é uma resolução válida
             if (width >= 640 && width <= 7680 && height >= 360 && height <= 4320) {
               resolution = `${width}x${height}`;
               const pixels = width * height;
-              
-              // Calcula qualidade baseada nos pixels (igual ao CloudStream)
-              quality = (pixels >= 6000000) ? 2160 :   // 4K
-                       (pixels >= 1400000) ? 1080 :    // Full HD
-                       (pixels >= 700000)  ? 720 :     // HD
-                       480;                            // SD
+              quality = (pixels >= 6000000) ? 2160 :
+                       (pixels >= 1400000) ? 1080 :
+                       (pixels >= 700000)  ? 720 : 480;
               break;
             }
           }
@@ -295,20 +273,14 @@ async function detectRealQuality(videoUrl, headers) {
       }
     }
     
-    // Se não encontrou resolução via bytes, tenta extrair do nome da URL
     if (quality === 0) {
       const urlMatch = videoUrl.match(/(\d{3,4})p/i);
-      if (urlMatch) {
-        quality = parseInt(urlMatch[1]);
-      } else {
-        quality = 1080; // Fallback
-      }
+      quality = urlMatch ? parseInt(urlMatch[1]) : 1080;
     }
     
     return quality;
-    
   } catch (error) {
-    return 1080; // Fallback em caso de erro
+    return 1080;
   }
 }
 
@@ -389,6 +361,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
   const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
 
   try {
+    // 1. Buscar página do Pomfy
     const pomfyUrl = mediaType === "movie"
       ? `${API_POMFY}/filme/${finalTmdbId}`
       : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
@@ -398,91 +371,145 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
 
     const html = await response.text();
 
-    const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
-    if (!linkMatch) return [];
-
-    const byseUrl = linkMatch[1];
-    const byseId = byseUrl.split("/").pop();
-
-    const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
-
-    const detailsResponse = await fetch(detailsUrl, {
-      headers: {
-        "accept": "*/*",
-        "referer": byseUrl,
-        "x-embed-origin": "api.pomfy.stream",
-        "x-embed-parent": byseUrl,
-        "user-agent": USER_AGENT,
-        "Cookie": COOKIE
-      }
-    });
-
-    if (!detailsResponse.ok) return [];
-
-    const detailsData = await detailsResponse.json();
-    const embedUrl = detailsData.embed_frame_url;
-
-    if (!embedUrl) return [];
-
-    const embedDomain = new URL(embedUrl).origin;
-
-    // Access Challenge
-    try {
-      const challengeUrl = `${embedDomain}/api/videos/access/challenge`;
-      await fetch(challengeUrl, {
-        method: 'POST',
-        headers: {
-          'accept': '*/*',
-          'origin': embedDomain,
-          'referer': embedUrl,
-          'user-agent': USER_AGENT
-        }
-      });
-    } catch (err) {
-      // Continua mesmo se falhar
+    // 2. Extrair statusToken (novo padrão) ou link (fallback)
+    let statusToken = null;
+    let byseId = null;
+    
+    const statusTokenMatch = html.match(/const statusToken="([^"]+)"/);
+    if (statusTokenMatch) {
+      statusToken = statusTokenMatch[1];
+      // O statusToken já contém o ID do vídeo (antes do ponto)
+      byseId = statusToken.split('.')[0];
+    } else {
+      // Fallback para padrão antigo
+      const linkMatch = html.match(/const link\s*=\s*"([^"]+)"/);
+      if (!linkMatch) return [];
+      const byseUrl = linkMatch[1];
+      byseId = byseUrl.split("/").pop();
     }
 
-    // Fingerprint FIXO
-    const fingerprint = generateFingerprint();
+    // 3. Buscar embed_frame_url (se não tiver pelo statusToken)
+    let embedUrl = null;
+    let embedDomain = null;
+    
+    if (byseId) {
+      const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
+      const detailsResponse = await fetch(detailsUrl, {
+        headers: {
+          "accept": "*/*",
+          "referer": pomfyUrl,
+          "x-embed-origin": "api.pomfy.stream",
+          "x-embed-parent": pomfyUrl,
+          "user-agent": USER_AGENT,
+          "Cookie": COOKIE
+        }
+      });
+      
+      if (detailsResponse.ok) {
+        const detailsData = await detailsResponse.json();
+        embedUrl = detailsData.embed_frame_url;
+        if (embedUrl) embedDomain = new URL(embedUrl).origin;
+      }
+    }
+    
+    if (!embedUrl || !embedDomain) return [];
 
-    // Playback Request
-    const playbackUrl = `${embedDomain}/api/videos/${byseId}/embed/playback`;
+    // 4. Se temos statusToken, chamar /api/play-token
+    let m3u8Url = null;
+    
+    if (statusToken) {
+      const playTokenUrl = `${embedDomain}/api/play-token?t=${statusToken}`;
+      
+      const playTokenResponse = await fetch(playTokenUrl, {
+        headers: {
+          "accept": "*/*",
+          "accept-language": "pt-BR,pt;q=0.9",
+          "referer": embedUrl,
+          "sec-ch-ua": '"Chromium";v="127", "Not)A;Brand";v="99"',
+          "sec-ch-ua-mobile": "?1",
+          "sec-ch-ua-platform": '"Android"',
+          "user-agent": USER_AGENT,
+          "cookie": COOKIE
+        }
+      });
+      
+      if (playTokenResponse.ok) {
+        const playTokenData = await playTokenResponse.json();
+        const playerUrl = playTokenData.url || playTokenData.iframe_url;
+        
+        if (playerUrl) {
+          // Carregar o player e extrair M3U8
+          const playerResponse = await fetch(playerUrl, {
+            headers: {
+              "User-Agent": USER_AGENT,
+              "Referer": embedUrl,
+              "Cookie": COOKIE
+            }
+          });
+          
+          if (playerResponse.ok) {
+            const playerHtml = await playerResponse.text();
+            const m3u8Match = playerHtml.match(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/i);
+            if (m3u8Match) m3u8Url = m3u8Match[0];
+          }
+        }
+      }
+    }
+    
+    // 5. Fallback: método antigo (fingerprint + playback)
+    if (!m3u8Url) {
+      // Access Challenge
+      try {
+        const challengeUrl = `${embedDomain}/api/videos/access/challenge`;
+        await fetch(challengeUrl, {
+          method: 'POST',
+          headers: {
+            'accept': '*/*',
+            'origin': embedDomain,
+            'referer': embedUrl,
+            'user-agent': USER_AGENT
+          }
+        });
+      } catch (err) {}
 
-    const playbackResponse = await fetch(playbackUrl, {
-      method: "POST",
-      headers: {
-        "accept": "*/*",
-        "accept-language": "pt-BR,pt;q=0.9",
-        "content-type": "application/json",
-        "origin": embedDomain,
-        "referer": embedUrl,
-        "x-embed-origin": "api.pomfy.stream",
-        "x-embed-parent": byseUrl,
-        "user-agent": USER_AGENT
-      },
-      body: JSON.stringify({ fingerprint: fingerprint })
-    });
+      const fingerprint = generateFingerprint();
+      const playbackUrl = `${embedDomain}/api/videos/${byseId}/embed/playback`;
 
-    if (!playbackResponse.ok) return [];
+      const playbackResponse = await fetch(playbackUrl, {
+        method: "POST",
+        headers: {
+          "accept": "*/*",
+          "accept-language": "pt-BR,pt;q=0.9",
+          "content-type": "application/json",
+          "origin": embedDomain,
+          "referer": embedUrl,
+          "x-embed-origin": "api.pomfy.stream",
+          "x-embed-parent": pomfyUrl,
+          "user-agent": USER_AGENT
+        },
+        body: JSON.stringify({ fingerprint: fingerprint })
+      });
 
-    const playbackData = await playbackResponse.json();
+      if (playbackResponse.ok) {
+        const playbackData = await playbackResponse.json();
+        if (playbackData.playback) {
+          const decryptResult = decryptPlayback(playbackData.playback);
+          if (decryptResult.success) m3u8Url = decryptResult.url;
+        }
+      }
+    }
 
-    if (!playbackData.playback) return [];
+    if (!m3u8Url) return [];
 
-    // Decrypt
-    const decryptResult = decryptPlayback(playbackData.playback);
-    if (!decryptResult.success) return [];
-
-    // DETECTA QUALIDADE REAL (análise de bytes do vídeo)
+    // 6. Detectar qualidade e retornar
     const streamHeaders = {
       "User-Agent": USER_AGENT,
       "Referer": embedUrl,
       "Accept": "*/*"
     };
     
-    const realQuality = await detectRealQuality(decryptResult.url, streamHeaders);
+    const realQuality = await detectRealQuality(m3u8Url, streamHeaders);
     
-    // Converte qualidade para string legível
     let qualityString = "";
     if (realQuality === 2160) qualityString = "4K";
     else if (realQuality === 1080) qualityString = "1080p";
@@ -494,11 +521,10 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       ? `Filme ${finalTmdbId} - ${qualityString}`
       : `S${seasonNum.toString().padStart(2, "0")}E${episodeNum.toString().padStart(2, "0")} - ${qualityString}`;
 
-    // Retorna o stream com qualidade detectada
     return [{
       name: title,
       title: title,
-      url: decryptResult.url,
+      url: m3u8Url,
       quality: realQuality,
       headers: streamHeaders
     }];
