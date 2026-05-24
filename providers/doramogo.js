@@ -1,6 +1,10 @@
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
-const CDN_PROXY = 'https://ondemand.mylifekorea.shop';
+
+let PROXY_URLS = {
+    primary: 'https://proxy-us-east1-outbound-series.doaswin.shop',
+    fallback: 'https://proxy-us-east1-forks-doramas.doaswin.shop'
+};
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0',
@@ -62,6 +66,32 @@ async function extractQualitiesFromM3u8(url) {
         return qualities;
     } catch {
         return [];
+    }
+}
+
+async function extractProxyUrlsFromPage() {
+    try {
+        const response = await fetch('https://www.doramogo.net/', { headers: HEADERS });
+        const html = await response.text();
+        
+        const scriptMatch = html.match(/<script[^>]*>([\s\S]*?)<\/script>/gi);
+        if (scriptMatch) {
+            for (const script of scriptMatch) {
+                const content = script.replace(/<\/?script[^>]*>/gi, '');
+                
+                const primaryMatch = content.match(/const\s+PRIMARY_URL\s*=\s*['"]([^'"]+)['"]/);
+                if (primaryMatch) {
+                    PROXY_URLS.primary = primaryMatch[1];
+                }
+                
+                const fallbackMatch = content.match(/const\s+FALLBACK_URL\s*=\s*['"]([^'"]+)['"]/);
+                if (fallbackMatch) {
+                    PROXY_URLS.fallback = fallbackMatch[1];
+                }
+            }
+        }
+    } catch (e) {
+        console.log('Erro ao extrair proxies, usando defaults');
     }
 }
 
@@ -135,6 +165,8 @@ function generateSlugVariations(baseTitle, season, ano) {
 }
 
 async function getStreams(tmdbId, mediaType, season, episode) {
+    await extractProxyUrlsFromPage();
+    
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     const epPadded = targetEpisode.toString().padStart(2, '0');
@@ -154,16 +186,23 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     for (const slug of slugVariations) {
         const firstLetter = slug.charAt(0).toUpperCase() || 'T';
 
-        let masterUrl;
+        let streamPath;
         if (mediaType === 'movie') {
-            masterUrl = `${CDN_PROXY}/${firstLetter}/${slug}/stream/stream.m3u8?nocache=${timestamp}`;
+            streamPath = `${firstLetter}/${slug}/stream/stream.m3u8?nocache=${timestamp}`;
         } else {
-            masterUrl = `${CDN_PROXY}/${firstLetter}/${slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
+            streamPath = `${firstLetter}/${slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
         }
 
-        if (!seen.has(masterUrl)) {
-            seen.add(masterUrl);
-            masterUrls.push(masterUrl);
+        const primaryUrl = `${PROXY_URLS.primary}/${streamPath}`;
+        const fallbackUrl = `${PROXY_URLS.fallback}/${streamPath}`;
+
+        if (!seen.has(primaryUrl)) {
+            seen.add(primaryUrl);
+            masterUrls.push(primaryUrl);
+        }
+        if (!seen.has(fallbackUrl)) {
+            seen.add(fallbackUrl);
+            masterUrls.push(fallbackUrl);
         }
     }
 
