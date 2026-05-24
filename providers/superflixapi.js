@@ -1,4 +1,5 @@
 const BASE_URL = "https://superflixapi.rest";
+const CDN_BASE = "https://llanfairpwllgwyngy.com";
 
 let SESSION_DATA = {
     cookies: '',
@@ -249,45 +250,6 @@ function decodeUnicodeEscapes(text) {
     });
 }
 
-async function getDirectVideoUrl(videoPageUrl, referer) {
-    try {
-        const response = await fetch(videoPageUrl, {
-            method: 'GET',
-            headers: {
-                'Referer': referer,
-                'User-Agent': HEADERS['User-Agent']
-            }
-        });
-        
-        if (!response.ok) return null;
-        
-        const text = await response.text();
-        
-        const patterns = [
-            /"securedLink":"([^"]+)"/,
-            /"videoSource":"([^"]+)"/,
-            /"file":"([^"]+)"/,
-            /"url":"([^"]+)"/,
-            /src:\s*["']([^"']+\.m3u8)["']/,
-            /source:\s*["']([^"']+\.m3u8)["']/,
-            /(https?:\/\/[^\s"']+\.m3u8)/
-        ];
-        
-        for (const pattern of patterns) {
-            const match = text.match(pattern);
-            if (match) {
-                let url = match[1];
-                url = url.replace(/\\/g, '');
-                return url;
-            }
-        }
-        
-        return null;
-    } catch (e) {
-        return null;
-    }
-}
-
 async function getStreams(tmdbId, mediaType, season, episode) {
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
@@ -295,10 +257,11 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     
     try {
         let activeBaseUrl = BASE_URL;
+        let activeCdnBase = CDN_BASE;
         
         const possibleDomains = [
             "https://superflixapi.rest",
-            "https://superflixapi.best", 
+            "https://superflixapi.best",
             "https://superflixapi.online"
         ];
         
@@ -464,16 +427,46 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 continue;
             }
             
-            let videoUrl = finalUrl;
-            let quality = 720;
+            const urlParts = finalUrl.split('/');
+            const playerHash = urlParts[urlParts.length - 1];
             
-            if (videoUrl.includes('/video/')) {
-                const directUrl = await getDirectVideoUrl(videoUrl, activeBaseUrl);
-                if (directUrl) {
-                    videoUrl = directUrl;
-                }
+            const cdnMatch = finalUrl.match(/(https?:\/\/[^\/]+)/);
+            if (cdnMatch) {
+                activeCdnBase = cdnMatch[1];
             }
             
+            const videoParams = new URLSearchParams();
+            videoParams.append('hash', playerHash);
+            videoParams.append('r', activeBaseUrl);
+            
+            const videoResponse = await fetch(`${activeCdnBase}/player/index.php?data=${playerHash}&do=getVideo`, {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'pt-BR',
+                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                    'Origin': activeCdnBase,
+                    'Referer': `${activeCdnBase}/`,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'User-Agent': HEADERS['User-Agent'],
+                    'Sec-Fetch-Dest': 'empty',
+                    'Sec-Fetch-Mode': 'cors',
+                    'Sec-Fetch-Site': 'same-origin',
+                    'Sec-Ch-Ua': '"Chromium";v="127", "Not)A;Brand";v="99"',
+                    'Sec-Ch-Ua-Mobile': '?1',
+                    'Sec-Ch-Ua-Platform': '"Android"'
+                },
+                body: videoParams.toString()
+            });
+            
+            if (!videoResponse.ok) continue;
+            
+            const videoData = await videoResponse.json();
+            const videoUrl = videoData.securedLink || videoData.videoSource;
+            
+            if (!videoUrl) continue;
+            
+            let quality = 720;
             if (videoUrl.includes('2160') || videoUrl.includes('4k')) quality = 2160;
             else if (videoUrl.includes('1440')) quality = 1440;
             else if (videoUrl.includes('1080')) quality = 1080;
@@ -493,7 +486,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 url: videoUrl,
                 quality: quality,
                 headers: {
-                    'Referer': activeBaseUrl,
+                    'Referer': `${activeCdnBase}/`,
                     'User-Agent': HEADERS['User-Agent']
                 }
             });
