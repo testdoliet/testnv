@@ -1,6 +1,6 @@
 /**
- * Gofilmes - Provider completo com busca otimizada
- * Fluxo: TMDB ID -> Busca por TMDB ID (paginação paralela) -> Extrai ID -> Obtém .m3u8
+ * Gofilmes - Provider para Nuvio/QuickJS
+ * Fluxo: TMDB ID -> Busca sequencial por páginas -> Extrai M3U8
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -27,7 +27,6 @@ const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const PROVIDER_NAME = "GoFilmes";
 
 const MAX_PAGES = 30;           // Máximo de páginas para buscar
-const PARALLEL_REQUESTS = 5;    // Requisições paralelas
 const MIN_SCORE_THRESHOLD = 35;
 
 const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36";
@@ -178,82 +177,65 @@ function findBestMatch(results, titlesToTry, year, mediaType) {
 }
 
 // ==============================================
-// BUSCA OTIMIZADA (QUE FUNCIONA!)
+// BUSCA SEQUENCIAL (COMPATÍVEL COM QUICKJS)
 // ==============================================
 
 // Busca uma única página
-async function fetchPage(page, category, pagesize = 50) {
-  const params = new URLSearchParams({
-    mod: 'search_posts',
-    page: page,
-    pagesize: pagesize,
-    category: category,
-    categoryexclude: 9,
-    order: 'date',
-    w: 282,
-    h: 421
-  });
-
-  const url = `${GOFILMES_URL}/engine/ajax/controller.php?${params.toString()}`;
-
+async function fetchPage(page, category) {
+  const url = `${GOFILMES_URL}/engine/ajax/controller.php?mod=search_posts&page=${page}&pagesize=50&category=${category}&categoryexclude=9&order=date&w=282&h=421`;
+  
   try {
     const res = await fetch(url, { headers: HEADERS });
     if (!res.ok) return null;
     const data = await res.json();
     return data.result || [];
   } catch (e) {
-    log("SEARCH", `Erro na página ${page}: ${e.message}`);
+    log("FETCH", `Erro na página ${page}: ${e.message}`);
     return null;
   }
 }
 
-// Busca por TMDB ID usando paginação paralela
+// Busca por TMDB ID (sequencial - compatível com QuickJS)
 async function searchByTmdbId(tmdbId, mediaType = "tv") {
   const category = mediaType === "tv" ? 14 : 13;
   const searchId = parseInt(tmdbId);
   
   log("SEARCH", `🔍 Buscando TMDB ID ${searchId} (categoria ${category})`);
   
-  // Buscar páginas em paralelo
-  for (let startPage = 0; startPage < MAX_PAGES; startPage += PARALLEL_REQUESTS) {
-    const batch = [];
-    for (let i = 0; i < PARALLEL_REQUESTS && startPage + i < MAX_PAGES; i++) {
-      batch.push(startPage + i);
+  // Busca sequencial página por página (sem Promise.all)
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const items = await fetchPage(page, category);
+    if (!items) continue;
+    
+    for (const item of items) {
+      const itemTmdb = item.xfields?.tmdb_id;
+      if (itemTmdb && parseInt(itemTmdb) === searchId) {
+        log("SEARCH", `✅ Encontrado na página ${page + 1}!`);
+        log("SEARCH", `   Título: ${item.title}`);
+        log("SEARCH", `   ID GoFilmes: ${item.id}`);
+        
+        let year = null;
+        if (item.xfields?.year) {
+          const yearStr = String(item.xfields.year);
+          const yearMatch = yearStr.match(/\d{4}/);
+          if (yearMatch) year = parseInt(yearMatch[0]);
+        }
+        
+        return {
+          id: parseInt(item.id),
+          title: item.title,
+          url: item.url,
+          year: year,
+          type: mediaType,
+          tmdbId: parseInt(item.xfields.tmdb_id),
+          imdbId: item.xfields?.imdb_id
+        };
+      }
     }
     
-    const promises = batch.map(page => fetchPage(page, category));
-    const batchResults = await Promise.all(promises);
-    
-    for (let i = 0; i < batchResults.length; i++) {
-      const items = batchResults[i];
-      if (!items) continue;
-      
-      for (const item of items) {
-        const itemTmdb = item.xfields?.tmdb_id;
-        if (itemTmdb && parseInt(itemTmdb) === searchId) {
-          const pageNum = batch[i] + 1;
-          log("SEARCH", `✅ Encontrado na página ${pageNum}!`);
-          log("SEARCH", `   Título: ${item.title}`);
-          log("SEARCH", `   ID GoFilmes: ${item.id}`);
-          
-          let year = null;
-          if (item.xfields?.year) {
-            const yearStr = String(item.xfields.year);
-            const yearMatch = yearStr.match(/\d{4}/);
-            if (yearMatch) year = parseInt(yearMatch[0]);
-          }
-          
-          return {
-            id: parseInt(item.id),
-            title: item.title,
-            url: item.url,
-            year: year,
-            type: mediaType,
-            tmdbId: parseInt(item.xfields.tmdb_id),
-            imdbId: item.xfields?.imdb_id
-          };
-        }
-      }
+    // Log de progresso a cada 5 páginas
+    if ((page + 1) % 5 === 0) {
+      log("SEARCH", `📄 Página ${page + 1}/${MAX_PAGES} - ${items.length} itens`);
     }
   }
   
@@ -261,7 +243,7 @@ async function searchByTmdbId(tmdbId, mediaType = "tv") {
   return null;
 }
 
-// Busca por título (fallback)
+// Busca por título (sequencial - fallback)
 async function searchByTitle(query, mediaType = "tv") {
   const category = mediaType === "tv" ? 14 : 13;
   const queryLower = query.toLowerCase();
@@ -270,46 +252,39 @@ async function searchByTitle(query, mediaType = "tv") {
   
   log("SEARCH", `🔍 Buscando por título: "${query}"`);
   
-  for (let startPage = 0; startPage < MAX_PAGES; startPage += PARALLEL_REQUESTS) {
-    const batch = [];
-    for (let i = 0; i < PARALLEL_REQUESTS && startPage + i < MAX_PAGES; i++) {
-      batch.push(startPage + i);
-    }
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const items = await fetchPage(page, category);
+    if (!items) continue;
     
-    const promises = batch.map(page => fetchPage(page, category));
-    const batchResults = await Promise.all(promises);
-    
-    for (const items of batchResults) {
-      if (!items) continue;
+    for (const item of items) {
+      const title = item.title || "";
+      if (!title || seenIds.has(item.id)) continue;
       
-      for (const item of items) {
-        const title = item.title || "";
-        if (!title || seenIds.has(item.id)) continue;
+      if (title.toLowerCase().includes(queryLower)) {
+        seenIds.add(item.id);
         
-        if (title.toLowerCase().includes(queryLower)) {
-          seenIds.add(item.id);
-          
-          let year = null;
-          if (item.xfields?.year) {
-            const yearStr = String(item.xfields.year);
-            const yearMatch = yearStr.match(/\d{4}/);
-            if (yearMatch) year = parseInt(yearMatch[0]);
-          }
-          
-          allMatches.push({
-            id: parseInt(item.id),
-            title: title,
-            url: item.url,
-            year: year,
-            type: mediaType,
-            tmdbId: item.xfields?.tmdb_id ? parseInt(item.xfields.tmdb_id) : null
-          });
+        let year = null;
+        if (item.xfields?.year) {
+          const yearStr = String(item.xfields.year);
+          const yearMatch = yearStr.match(/\d{4}/);
+          if (yearMatch) year = parseInt(yearMatch[0]);
         }
+        
+        allMatches.push({
+          id: parseInt(item.id),
+          title: title,
+          url: item.url,
+          year: year,
+          type: mediaType,
+          tmdbId: item.xfields?.tmdb_id ? parseInt(item.xfields.tmdb_id) : null
+        });
+        
+        log("SEARCH", `   📌 "${title}" (ID: ${item.id})`);
       }
     }
   }
   
-  log("SEARCH", `✅ ${allMatches.length} resultados para "${query}"`);
+  log("SEARCH", `✅ Total: ${allMatches.length} resultados para "${query}"`);
   return allMatches;
 }
 
