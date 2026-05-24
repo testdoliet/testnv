@@ -1,5 +1,4 @@
 const BASE_URL = "https://superflixapi.rest";
-const CDN_BASE = "https://llanfairpwllgwyngy.com";
 
 let SESSION_DATA = {
     cookies: '',
@@ -250,16 +249,53 @@ function decodeUnicodeEscapes(text) {
     });
 }
 
+async function getDirectVideoUrl(videoPageUrl, referer) {
+    try {
+        const response = await fetch(videoPageUrl, {
+            method: 'GET',
+            headers: {
+                'Referer': referer,
+                'User-Agent': HEADERS['User-Agent']
+            }
+        });
+        
+        if (!response.ok) return null;
+        
+        const text = await response.text();
+        
+        const patterns = [
+            /"securedLink":"([^"]+)"/,
+            /"videoSource":"([^"]+)"/,
+            /"file":"([^"]+)"/,
+            /"url":"([^"]+)"/,
+            /src:\s*["']([^"']+\.m3u8)["']/,
+            /source:\s*["']([^"']+\.m3u8)["']/,
+            /(https?:\/\/[^\s"']+\.m3u8)/
+        ];
+        
+        for (const pattern of patterns) {
+            const match = text.match(pattern);
+            if (match) {
+                let url = match[1];
+                url = url.replace(/\\/g, '');
+                return url;
+            }
+        }
+        
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
 async function getStreams(tmdbId, mediaType, season, episode) {
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     const results = [];
     
     try {
-        // 🔥 DETECTA DOMÍNIO DINÂMICO
         let activeBaseUrl = BASE_URL;
         
-        // Testa domínios possíveis
         const possibleDomains = [
             "https://superflixapi.rest",
             "https://superflixapi.best", 
@@ -311,7 +347,6 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }
         }
         
-        // Atualiza BASE_URL com o domínio final da página
         const finalPageUrl = pageResponse.url;
         const baseUrlMatch = finalPageUrl.match(/(https?:\/\/[^\/]+)/);
         if (baseUrlMatch) {
@@ -420,7 +455,6 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             
             if (!redirectResponse.ok && !location) continue;
             
-            // 🔥 BLOGGER - mantém igual
             if (finalUrl.includes('blogger.com/video.g') || finalUrl.includes('blogger.com')) {
                 const title = mediaType === 'movie' ? `Filme ${tmdbId}` : `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
                 
@@ -430,12 +464,16 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 continue;
             }
             
-            // 🔥 PARTE CORRIGIDA: USA A URL FINAL DIRETAMENTE
-            // Se a URL já contém /video/ ou termina com .m3u8/.mp4, usa direto
             let videoUrl = finalUrl;
             let quality = 720;
             
-            // Tenta extrair qualidade da URL
+            if (videoUrl.includes('/video/')) {
+                const directUrl = await getDirectVideoUrl(videoUrl, activeBaseUrl);
+                if (directUrl) {
+                    videoUrl = directUrl;
+                }
+            }
+            
             if (videoUrl.includes('2160') || videoUrl.includes('4k')) quality = 2160;
             else if (videoUrl.includes('1440')) quality = 1440;
             else if (videoUrl.includes('1080')) quality = 1080;
@@ -464,7 +502,6 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         return results;
         
     } catch (error) {
-        console.error(error);
         return [];
     }
 }
