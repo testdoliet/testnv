@@ -256,12 +256,13 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const results = [];
     
     try {
+        // 🔥 DETECTA DOMÍNIO DINÂMICO
         let activeBaseUrl = BASE_URL;
-        let activeCdnBase = CDN_BASE;
         
+        // Testa domínios possíveis
         const possibleDomains = [
             "https://superflixapi.rest",
-            "https://superflixapi.best",
+            "https://superflixapi.best", 
             "https://superflixapi.online"
         ];
         
@@ -310,6 +311,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }
         }
         
+        // Atualiza BASE_URL com o domínio final da página
         const finalPageUrl = pageResponse.url;
         const baseUrlMatch = finalPageUrl.match(/(https?:\/\/[^\/]+)/);
         if (baseUrlMatch) {
@@ -418,6 +420,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             
             if (!redirectResponse.ok && !location) continue;
             
+            // 🔥 BLOGGER - mantém igual
             if (finalUrl.includes('blogger.com/video.g') || finalUrl.includes('blogger.com')) {
                 const title = mediaType === 'movie' ? `Filme ${tmdbId}` : `S${targetSeason.toString().padStart(2, '0')}E${targetEpisode.toString().padStart(2, '0')}`;
                 
@@ -427,46 +430,12 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 continue;
             }
             
-            const urlParts = finalUrl.split('/');
-            const playerHash = urlParts[urlParts.length - 1];
-            
-            const cdnMatch = finalUrl.match(/(https?:\/\/[^\/]+)/);
-            if (cdnMatch) {
-                activeCdnBase = cdnMatch[1];
-            }
-            
-            const videoParams = new URLSearchParams();
-            videoParams.append('hash', playerHash);
-            videoParams.append('r', activeBaseUrl);
-            
-            const videoResponse = await fetch(`${activeCdnBase}/player/index.php?data=${playerHash}&do=getVideo`, {
-                method: 'POST',
-                headers: {
-                    'Accept': 'application/json, text/plain, */*',
-                    'Accept-Language': 'pt-BR',
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                    'Origin': activeCdnBase,
-                    'Referer': `${activeCdnBase}/`,
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'User-Agent': HEADERS['User-Agent'],
-                    'Sec-Fetch-Dest': 'empty',
-                    'Sec-Fetch-Mode': 'cors',
-                    'Sec-Fetch-Site': 'same-origin',
-                    'Sec-Ch-Ua': '"Chromium";v="127", "Not)A;Brand";v="99"',
-                    'Sec-Ch-Ua-Mobile': '?1',
-                    'Sec-Ch-Ua-Platform': '"Android"'
-                },
-                body: videoParams.toString()
-            });
-            
-            if (!videoResponse.ok) continue;
-            
-            const videoData = await videoResponse.json();
-            const videoUrl = videoData.securedLink || videoData.videoSource;
-            
-            if (!videoUrl) continue;
-            
+            // 🔥 PARTE CORRIGIDA: USA A URL FINAL DIRETAMENTE
+            // Se a URL já contém /video/ ou termina com .m3u8/.mp4, usa direto
+            let videoUrl = finalUrl;
             let quality = 720;
+            
+            // Tenta extrair qualidade da URL
             if (videoUrl.includes('2160') || videoUrl.includes('4k')) quality = 2160;
             else if (videoUrl.includes('1440')) quality = 1440;
             else if (videoUrl.includes('1080')) quality = 1080;
@@ -486,7 +455,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 url: videoUrl,
                 quality: quality,
                 headers: {
-                    'Referer': `${activeCdnBase}/`,
+                    'Referer': activeBaseUrl,
                     'User-Agent': HEADERS['User-Agent']
                 }
             });
@@ -495,6 +464,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         return results;
         
     } catch (error) {
+        console.error(error);
         return [];
     }
 }
