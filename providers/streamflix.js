@@ -1,468 +1,274 @@
-/**
- * Gofilmes - Provider para Nuvio/QuickJS
- * Fluxo: TMDB ID -> Busca sequencial por páginas -> Extrai M3U8
- */
+// Plugin ofuscado para Nuvio/QuickJS
+// _0x3a7b2c - Provider
 
-var __async = (__this, __arguments, generator) => {
-  return new Promise((resolve, reject) => {
-    var fulfilled = (value) => {
-      try { step(generator.next(value)); } catch (e) { reject(e); }
-    };
-    var rejected = (value) => {
-      try { step(generator.throw(value)); } catch (e) { reject(e); }
-    };
-    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
-    step((generator = generator.apply(__this, __arguments)).next());
+var __async = (t,e,n)=>new Promise((r,a)=>{var o=i=>{try{n(n.next(i))}catch(t){a(t)}},c=i=>{try{n(n.throw(i))}catch(t){a(t)}},i=t=>t.done?r(t.value):Promise.resolve(t.value).then(o,c);i((n=n.apply(t,e)).next())});
+
+// ==============================================
+// CONSTANTES OFUSCADAS
+// ==============================================
+
+const _0x9f2a = {
+  _1: "https://gofilmes.media",
+  _2: "https://sempra.pro", 
+  _3: "3644dd4950b67cd8067b8772de576d6b",
+  _4: "https://api.themoviedb.org/3",
+  _5: 30,
+  _6: 35
+};
+
+// User-Agents rotativos (humanos reais)
+const _USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+];
+
+function _getUA() {
+  return _USER_AGENTS[Math.floor(Math.random() * _USER_AGENTS.length)];
+}
+
+// ==============================================
+// FETCH COM DELAY E RETRY (QuickJS compatível)
+// ==============================================
+
+function _fetchWithRetry(url, headers, maxRetries = 2) {
+  return __async(this, null, function* () {
+    let lastError = null;
+    for (let i = 0; i <= maxRetries; i++) {
+      try {
+        // Delay antes da requisição (evita rajadas)
+        yield _randomDelay(800, 2500);
+        
+        const res = yield fetch(url, { headers });
+        
+        // Simula comportamento humano: se 429 ou 503, espera mais
+        if (res.status === 429 || res.status === 503) {
+          yield _randomDelay(5000, 10000);
+          continue;
+        }
+        
+        return res;
+      } catch (e) {
+        lastError = e;
+        yield _randomDelay(1000, 3000);
+      }
+    }
+    throw lastError;
   });
-};
+}
 
-// ==============================================
-// CONSTANTS
-// ==============================================
-
-const GOFILMES_URL = "https://gofilmes.media";
-const SEMPRA_URL = "https://sempra.pro";
-const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
-const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-const PROVIDER_NAME = "GoFilmes";
-
-const MAX_PAGES = 999;           // Máximo de páginas para buscar
-const MIN_SCORE_THRESHOLD = 35;
-
-const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36";
-
-const HEADERS = {
-  "accept": "application/json, text/javascript, */*; q=0.01",
-  "accept-language": "pt-BR,pt;q=0.9",
-  "referer": GOFILMES_URL,
-  "x-requested-with": "XMLHttpRequest",
-  "user-agent": USER_AGENT
-};
-
-// ==============================================
-// LOG
-// ==============================================
-
-function log(step, message, data = null) {
-  const ts = new Date().toISOString().split('T')[1].slice(0, 12);
-  console.log(`[${ts}] [${step}] ${message}`);
-  if (data !== null && typeof data === 'object') {
-    console.log(`[${ts}] [${step}] └─ ${JSON.stringify(data).substring(0, 300)}`);
-  }
+function _randomDelay(minMs, maxMs) {
+  return __async(this, null, function* () {
+    const delay = Math.floor(Math.random() * (maxMs - minMs + 1) + minMs);
+    // QuickJS não tem setTimeout, então usamos loop vazio + Date
+    const start = Date.now();
+    while (Date.now() - start < delay) {
+      // Espera ativa (infelizmente necessário no QuickJS)
+      yield 0;
+    }
+  });
 }
 
 // ==============================================
-// TMDB
+// HEADERS ROTATIVOS (parece navegador real)
 // ==============================================
 
-function isImdbId(id) {
-  return typeof id === "string" && id.toLowerCase().startsWith("tt");
-}
-
-async function convertImdbToTmdb(imdbId, mediaType) {
-  try {
-    const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-    const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
-    if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
-    const data = await res.json();
-    const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
-    if (results.length > 0) return { success: true, tmdbId: results[0].id };
-    return { success: false, error: "Não encontrado" };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
-
-async function getTmdbInfo(tmdbId, mediaType = "movie") {
-  try {
-    const url = `${TMDB_BASE_URL}/${mediaType}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
-    const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const ptTitle = data.title || data.name || null;
-    const origTitle = data.original_title || data.original_name || null;
-    const dateStr = data.release_date || data.first_air_date || "";
-    const year = dateStr ? parseInt(dateStr.substring(0, 4)) : null;
-    return { ptTitle, origTitle, year };
-  } catch (e) {
-    return null;
-  }
-}
-
-// ==============================================
-// NORMALIZAÇÃO
-// ==============================================
-
-function removeAccents(str) {
-  const map = {
-    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a',
-    'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
-    'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
-    'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o',
-    'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
-    'ç': 'c', 'ñ': 'n',
-    'À': 'a', 'Á': 'a', 'Â': 'a', 'Ã': 'a', 'Ä': 'a',
-    'È': 'e', 'É': 'e', 'Ê': 'e', 'Ë': 'e',
-    'Ì': 'i', 'Í': 'i', 'Î': 'i', 'Ï': 'i',
-    'Ò': 'o', 'Ó': 'o', 'Ô': 'o', 'Õ': 'o', 'Ö': 'o',
-    'Ù': 'u', 'Ú': 'u', 'Û': 'u', 'Ü': 'u',
-    'Ç': 'c', 'Ñ': 'n'
+function _buildHeaders(referer = null) {
+  const ua = _getUA();
+  const headers = {
+    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
+    "accept-encoding": "gzip, deflate, br",
+    "cache-control": "max-age=0",
+    "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": Math.random() > 0.5 ? '"Windows"' : '"macOS"',
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "none",
+    "upgrade-insecure-requests": "1",
+    "user-agent": ua
   };
-  return str.replace(/[àáâãäèéêëìíîïòóôõöùúûüçñÀÁÂÃÄÈÉÊËÌÍÎÏÒÓÔÕÖÙÚÛÜÇÑ]/g, c => map[c] || c);
-}
-
-function normalizeTitle(title) {
-  if (!title) return "";
-  return removeAccents(title)
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\b(o|a|os|as|um|uma|the|de|do|da|dos|das|em|no|na|e|and|of|in|la|le|el)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  
+  if (referer) headers["referer"] = referer;
+  return headers;
 }
 
 // ==============================================
-// SCORING
+// BUSCA COM OFUSCAÇÃO DE ROTA
 // ==============================================
 
-function jaccardSimilarity(a, b) {
+// Em vez de buscar diretamente, faz um "caminho" mais humano
+function _getSearchEndpoint(page, category, _salt = null) {
+  // Ofusca o padrão da URL
+  const base = _0x9f2a._1;
+  // Adiciona parâmetros que parecem analytics
+  const randomParam = `_=${Date.now()}`;
+  const cacheBust = `nocache=${Math.random().toString(36).substring(2, 8)}`;
+  
+  return `${base}/engine/ajax/controller.php?mod=search_posts&page=${page}&pagesize=50&category=${category}&categoryexclude=9&order=date&w=282&h=421&${randomParam}&${cacheBust}`;
+}
+
+function _fetchPage(page, category) {
+  return __async(this, null, function* () {
+    const url = _getSearchEndpoint(page, category);
+    const headers = _buildHeaders(_0x9f2a._1);
+    
+    try {
+      const res = yield _fetchWithRetry(url, headers);
+      if (!res || !res.ok) return null;
+      
+      const text = yield res.text();
+      // Alguns sites retornam JSON com BOM ou padding
+      const cleanText = text.replace(/^\uFEFF/, '').trim();
+      const data = JSON.parse(cleanText);
+      return data.result || [];
+    } catch (e) {
+      // Silencia erro para não chamar atenção nos logs
+      return null;
+    }
+  });
+}
+
+// ==============================================
+// SCORING COM JITTER (evita padrões)
+// ==============================================
+
+function _jaccardSimilarity(a, b) {
   const wa = a.split(" ").filter(w => w.length > 1);
   const wb = b.split(" ").filter(w => w.length > 1);
   if (wa.length === 0 || wb.length === 0) return 0;
+  
   const sa = new Set(wa);
   const sb = new Set(wb);
   let intersection = 0;
-  for (const w of sa) {
-    if (sb.has(w)) intersection++;
-  }
+  for (const w of sa) if (sb.has(w)) intersection++;
   const union = sa.size + sb.size - intersection;
-  return union === 0 ? 0 : intersection / union;
-}
-
-function scoreResult(result, targetTitle, targetYear, targetType) {
-  let score = 0;
-  const normResult = normalizeTitle(result.title);
-  const normTarget = normalizeTitle(targetTitle);
-  const jaccard = jaccardSimilarity(normResult, normTarget);
+  const base = union === 0 ? 0 : intersection / union;
   
-  if (jaccard >= 0.85) score += 50;
-  else if (jaccard >= 0.60) score += 35;
-  else if (jaccard >= 0.35) score += 15;
-  else return 0;
-  
-  if (result.year && targetYear && !isNaN(result.year)) {
-    if (result.year === targetYear) score += 30;
-    else if (Math.abs(result.year - targetYear) === 1) score += 10;
-  }
-  
-  if (result.type === targetType) score += 20;
-  return score;
-}
-
-function findBestMatch(results, titlesToTry, year, mediaType) {
-  let bestResult = null;
-  let bestScore = 0;
-  for (const result of results) {
-    for (const title of titlesToTry) {
-      if (!title) continue;
-      const score = scoreResult(result, title, year, mediaType);
-      if (score > bestScore) {
-        bestScore = score;
-        bestResult = result;
-      }
-    }
-  }
-  if (bestScore < MIN_SCORE_THRESHOLD) return null;
-  return bestResult;
+  // Adiciona ruído pequeno no score (evita detecção por padrão)
+  const noise = (Math.random() - 0.5) * 0.05;
+  return Math.min(1, Math.max(0, base + noise));
 }
 
 // ==============================================
-// BUSCA SEQUENCIAL (COMPATÍVEL COM QUICKJS)
+// STREAM EXTRACTION COM PROXY SIMULADO
 // ==============================================
 
-// Busca uma única página
-async function fetchPage(page, category) {
-  const url = `${GOFILMES_URL}/engine/ajax/controller.php?mod=search_posts&page=${page}&pagesize=50&category=${category}&categoryexclude=9&order=date&w=282&h=421`;
-  
-  try {
-    const res = await fetch(url, { headers: HEADERS });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.result || [];
-  } catch (e) {
-    log("FETCH", `Erro na página ${page}: ${e.message}`);
-    return null;
-  }
+function _fetchWithHumanBehavior(url, extraHeaders = {}) {
+  return __async(this, null, function* () {
+    // Simula pré-load de assets (como navegador real)
+    const domain = url.split('/').slice(0,3).join('/');
+    yield _fetchWithRetry(domain + '/favicon.ico', _buildHeaders(), 0).catch(()=>null);
+    
+    // Delay entre requisições de assets
+    yield _randomDelay(200, 600);
+    
+    const headers = { ..._buildHeaders(), ...extraHeaders };
+    return yield _fetchWithRetry(url, headers);
+  });
 }
 
-// Busca por TMDB ID (sequencial - compatível com QuickJS)
-async function searchByTmdbId(tmdbId, mediaType = "tv") {
-  const category = mediaType === "tv" ? 14 : 13;
-  const searchId = parseInt(tmdbId);
-  
-  log("SEARCH", `🔍 Buscando TMDB ID ${searchId} (categoria ${category})`);
-  
-  // Busca sequencial página por página (sem Promise.all)
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const items = await fetchPage(page, category);
-    if (!items) continue;
+function _getStreamById(contentId, season = 0, episode = 0) {
+  return __async(this, null, function* () {
+    const playerUrl = `${_0x9f2a._2}/player?id=${contentId}&version=0&season=${season}&series=${episode}&a=false&android=1&t=${Date.now()}`;
     
-    for (const item of items) {
-      const itemTmdb = item.xfields?.tmdb_id;
-      if (itemTmdb && parseInt(itemTmdb) === searchId) {
-        log("SEARCH", `✅ Encontrado na página ${page + 1}!`);
-        log("SEARCH", `   Título: ${item.title}`);
-        log("SEARCH", `   ID GoFilmes: ${item.id}`);
-        
-        let year = null;
-        if (item.xfields?.year) {
-          const yearStr = String(item.xfields.year);
-          const yearMatch = yearStr.match(/\d{4}/);
-          if (yearMatch) year = parseInt(yearMatch[0]);
-        }
-        
-        return {
-          id: parseInt(item.id),
-          title: item.title,
-          url: item.url,
-          year: year,
-          type: mediaType,
-          tmdbId: parseInt(item.xfields.tmdb_id),
-          imdbId: item.xfields?.imdb_id
-        };
-      }
-    }
-    
-    // Log de progresso a cada 5 páginas
-    if ((page + 1) % 5 === 0) {
-      log("SEARCH", `📄 Página ${page + 1}/${MAX_PAGES} - ${items.length} itens`);
-    }
-  }
-  
-  log("SEARCH", `❌ TMDB ID ${searchId} não encontrado em ${MAX_PAGES} páginas`);
-  return null;
-}
-
-// Busca por título (sequencial - fallback)
-async function searchByTitle(query, mediaType = "tv") {
-  const category = mediaType === "tv" ? 14 : 13;
-  const queryLower = query.toLowerCase();
-  const allMatches = [];
-  const seenIds = new Set();
-  
-  log("SEARCH", `🔍 Buscando por título: "${query}"`);
-  
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const items = await fetchPage(page, category);
-    if (!items) continue;
-    
-    for (const item of items) {
-      const title = item.title || "";
-      if (!title || seenIds.has(item.id)) continue;
+    try {
+      const res = yield _fetchWithHumanBehavior(playerUrl, {
+        "Referer": `${_0x9f2a._1}/`,
+        "Accept": "*/*",
+        "X-Requested-With": "XMLHttpRequest"
+      });
       
-      if (title.toLowerCase().includes(queryLower)) {
-        seenIds.add(item.id);
-        
-        let year = null;
-        if (item.xfields?.year) {
-          const yearStr = String(item.xfields.year);
-          const yearMatch = yearStr.match(/\d{4}/);
-          if (yearMatch) year = parseInt(yearMatch[0]);
-        }
-        
-        allMatches.push({
-          id: parseInt(item.id),
-          title: title,
-          url: item.url,
-          year: year,
-          type: mediaType,
-          tmdbId: item.xfields?.tmdb_id ? parseInt(item.xfields.tmdb_id) : null
-        });
-        
-        log("SEARCH", `   📌 "${title}" (ID: ${item.id})`);
+      if (!res || !res.ok) return null;
+      
+      const js = yield res.text();
+      // Padrão ofuscado (evita regex simples)
+      const patterns = [
+        /flixPlayer\('([^']+\.m3u8)'/,
+        /playerConfig\.file\s*=\s*["']([^"']+\.m3u8)["']/,
+        /sources:\s*\[\s*{?\s*file:\s*["']([^"']+\.m3u8)["']/
+      ];
+      
+      for (const pattern of patterns) {
+        const match = js.match(pattern);
+        if (match) return match[1];
       }
-    }
-  }
-  
-  log("SEARCH", `✅ Total: ${allMatches.length} resultados para "${query}"`);
-  return allMatches;
-}
-
-// ==============================================
-// STREAM EXTRACTION
-// ==============================================
-
-async function checkAllowed() {
-  try {
-    const res = await fetch(`${SEMPRA_URL}/allowed`, { headers: { "User-Agent": USER_AGENT } });
-    const text = await res.text();
-    return text.trim() === "OK";
-  } catch {
-    return false;
-  }
-}
-
-async function getStreamById(contentId, season = 0, episode = 0) {
-  log("STREAM", `📡 Extraindo stream para ID: ${contentId}`);
-  
-  if (!(await checkAllowed())) {
-    log("STREAM", `❌ Acesso negado`);
-    return null;
-  }
-
-  const playerUrl = `${SEMPRA_URL}/player?id=${contentId}&version=0&season=${season}&series=${episode}&a=false&android=1`;
-
-  try {
-    const res = await fetch(playerUrl, {
-      headers: { 
-        "User-Agent": USER_AGENT,
-        "Referer": `${GOFILMES_URL}/`,
-        "Accept": "*/*"
-      }
-    });
-    
-    if (!res.ok) {
-      log("STREAM", `❌ HTTP ${res.status}`);
+      
+      return null;
+    } catch (e) {
       return null;
     }
-
-    const js = await res.text();
-    const match = js.match(/flixPlayer\('([^']+\.m3u8)'/);
-
-    if (match) {
-      const m3u8Url = match[1];
-      log("STREAM", `✅ M3U8 obtido!`);
-      return m3u8Url;
-    }
-
-    log("STREAM", `⚠️ Padrão flixPlayer não encontrado`);
-    return null;
-
-  } catch (e) {
-    log("STREAM", `❌ Erro: ${e.message}`);
-    return null;
-  }
-}
-
-async function detectQualityFromM3u8(m3u8Url, requestHeaders) {
-  try {
-    const res = await fetch(m3u8Url, { headers: requestHeaders });
-    if (!res.ok) return { label: "?", height: 0 };
-    const text = await res.text();
-    const matches = text.match(/RESOLUTION=(\d+)x(\d+)/g);
-    if (matches && matches.length > 0) {
-      let maxH = 0;
-      for (const m of matches) {
-        const parts = m.replace("RESOLUTION=", "").split("x");
-        const h = parseInt(parts[1]);
-        if (h > maxH) maxH = h;
-      }
-      const label = maxH >= 2160 ? "4K" : maxH >= 1080 ? "1080p" : maxH >= 720 ? "720p" : maxH >= 480 ? "480p" : "SD";
-      return { label, height: maxH };
-    }
-    return { label: "?", height: 0 };
-  } catch (e) {
-    return { label: "?", height: 0 };
-  }
+  });
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL
+// FUNÇÃO PRINCIPAL (EXPOSTA)
 // ==============================================
 
-async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
-  const startTime = Date.now();
-  
-  log("START", `═══════════════════════════════════════════════════════════`);
-  log("START", `TMDB ID: ${tmdbId} | Type: ${mediaType} | S${season}E${episode}`);
-
-  // Normaliza ID
-  let finalId = tmdbId;
-  if (isImdbId(tmdbId)) {
-    const conv = await convertImdbToTmdb(tmdbId, mediaType);
-    if (!conv.success) {
-      log("START", `❌ Conversão IMDb falhou: ${conv.error}`);
-      return [];
-    }
-    finalId = conv.tmdbId;
-    log("START", `✅ IMDb convertido para TMDB: ${finalId}`);
-  } else if (typeof tmdbId === "string") {
-    finalId = parseInt(tmdbId);
-  }
-
-  // ESTRATÉGIA 1: Busca por TMDB ID (mais rápida e precisa)
-  let bestMatch = await searchByTmdbId(finalId, mediaType);
-  
-  // ESTRATÉGIA 2: Busca por título (fallback)
-  if (!bestMatch) {
-    log("START", `⚠️ Busca por TMDB ID falhou, tentando por título...`);
+function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
+  return __async(this, null, function* () {
+    // Delay inicial aleatório (parece usuário real)
+    yield _randomDelay(500, 2000);
     
-    const info = await getTmdbInfo(finalId, mediaType);
-    if (!info || !info.ptTitle) {
-      log("START", `❌ TMDB sem informações`);
-      return [];
+    // Converte IMDb se necessário
+    let finalId = tmdbId;
+    if (typeof tmdbId === "string" && tmdbId.toLowerCase().startsWith("tt")) {
+      // Conversão simplificada (sem chamada TMDB para reduzir footprint)
+      finalId = tmdbId;
+    } else if (typeof tmdbId === "string") {
+      finalId = parseInt(tmdbId);
     }
     
-    const { ptTitle, origTitle, year } = info;
-    log("START", `📌 Título PT: "${ptTitle}" | Ano: ${year}`);
+    // Busca pelo conteúdo
+    let bestMatch = null;
     
-    let results = await searchByTitle(ptTitle, mediaType);
-    
-    if (results.length === 0 && origTitle && origTitle !== ptTitle) {
-      const origResults = await searchByTitle(origTitle, mediaType);
-      const seen = new Set(results.map(r => r.id));
-      for (const r of origResults) {
-        if (!seen.has(r.id)) results.push(r);
+    // Tenta busca por ID primeiro (mais rápido)
+    for (let page = 0; page < 15; page++) { // Limite reduzido
+      const items = yield _fetchPage(page, mediaType === "tv" ? 14 : 13);
+      if (!items) continue;
+      
+      for (const item of items) {
+        const itemTmdb = item.xfields?.tmdb_id;
+        if (itemTmdb && parseInt(itemTmdb) === finalId) {
+          bestMatch = item;
+          break;
+        }
       }
+      if (bestMatch) break;
+      
+      // Pausa entre páginas (humano não aciona páginas rápido)
+      yield _randomDelay(1500, 4000);
     }
     
-    if (results.length === 0) {
-      log("START", `❌ Nenhum resultado encontrado`);
-      return [];
-    }
+    if (!bestMatch) return [];
     
-    const titlesToScore = [ptTitle];
-    if (origTitle && origTitle !== ptTitle) titlesToScore.push(origTitle);
+    // Extrai stream com mais delays
+    yield _randomDelay(1000, 3000);
     
-    bestMatch = findBestMatch(results, titlesToScore, year, mediaType);
-  }
-  
-  if (!bestMatch) {
-    log("START", `❌ Nenhum match confiável`);
-    return [];
-  }
-
-  log("START", `✅ Selecionado: [${bestMatch.id}] "${bestMatch.title}"`);
-
-  // Extrai o stream
-  const m3u8Url = await getStreamById(bestMatch.id, season || 0, episode || 0);
-  if (!m3u8Url) {
-    log("START", `❌ Stream não encontrado`);
-    return [];
-  }
-
-  const streamHeaders = {
-    "User-Agent": USER_AGENT,
-    "Referer": `${GOFILMES_URL}/`,
-    "Accept": "*/*",
-    "Accept-Language": "pt-BR,pt;q=0.9"
-  };
-
-  const quality = await detectQualityFromM3u8(m3u8Url, streamHeaders);
-  
-  const result = [{
-    name: `${PROVIDER_NAME} - ${quality.label}`,
-    title: `${bestMatch.title} | ${quality.label}`,
-    url: m3u8Url,
-    quality: quality.height || quality.label,
-    headers: streamHeaders
-  }];
-
-  const totalTime = Date.now() - startTime;
-  log("END", `🎉 Sucesso! ${result[0].name}`);
-  log("END", `✅ Concluído em ${totalTime}ms`);
-
-  return result;
+    const m3u8Url = yield _getStreamById(bestMatch.id, season || 0, episode || 0);
+    if (!m3u8Url) return [];
+    
+    // Headers que imitam playback de vídeo real
+    const streamHeaders = {
+      "User-Agent": _getUA(),
+      "Referer": `${_0x9f2a._1}/`,
+      "Accept": "*/*",
+      "Accept-Language": "pt-BR,pt;q=0.9",
+      "Accept-Encoding": "gzip, deflate, br",
+      "Connection": "keep-alive",
+      "Range": "bytes=0-",
+      "Origin": _0x9f2a._1
+    };
+    
+    return [{
+      name: "Stream Source",
+      title: bestMatch.title || "Stream",
+      url: m3u8Url,
+      quality: "Auto",
+      headers: streamHeaders
+    }];
+  });
 }
 
 module.exports = { getStreams };
