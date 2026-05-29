@@ -26,7 +26,7 @@ const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const PROVIDER_NAME = "GoFilmes";
 
-const MAX_PAGES = 30;           // Máximo de páginas para buscar
+const MAX_PAGES = 999;           // Máximo de páginas para buscar
 const MIN_SCORE_THRESHOLD = 35;
 
 const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36";
