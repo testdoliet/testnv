@@ -554,6 +554,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
         name: "Pomfy",
         title: "1080p",
         url: decryptResult.url,
+        type: "hls",
         quality: 1080,
         headers: { "User-Agent": USER_AGENT, "Referer": embedUrl }
       });
