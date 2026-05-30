@@ -599,4 +599,97 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       const challengeUrl = `${playerDomain}/api/videos/access/challenge`;
       addDebug(`🔐 [5/6] CHALLENGE`, challengeUrl);
       
-      const challengeRes = await fetch(challengeUrl
+      const challengeRes = await fetch(challengeUrl, {
+        method: 'POST',
+        headers: { 'accept': '*/*', 'origin': playerDomain, 'referer': embedUrl, 'user-agent': USER_AGENT }
+      });
+      
+      if (challengeRes.ok) {
+        addDebug(`✅ [5/6] CHALLENGE OK`, `HTTP ${challengeRes.status}`);
+      } else {
+        addDebug(`⚠️ [5/6] CHALLENGE IGNORADO`, `HTTP ${challengeRes.status}`);
+      }
+    } catch (e) {
+      addDebug(`⚠️ [5/6] CHALLENGE ERRO`, e.message);
+    }
+
+    // 5. Playback
+    const fingerprint = generateFingerprint();
+    addDebug(`🔐 [6/6] FINGERPRINT GERADO`, `viewer_id: ${fingerprint.viewer_id}`);
+
+    const playbackUrl = `${playerDomain}/api/videos/${byseId}/embed/playback`;
+    addDebug(`📡 [6/6] PLAYBACK URL`, playbackUrl);
+    
+    const playbackRes = await fetch(playbackUrl, {
+      method: "POST",
+      headers: { 
+        "content-type": "application/json", 
+        "origin": playerDomain, 
+        "referer": embedUrl, 
+        "user-agent": USER_AGENT,
+        "x-embed-origin": "api.pomfy.stream",
+        "x-embed-parent": byseUrl
+      },
+      body: JSON.stringify({ fingerprint: fingerprint })
+    });
+    
+    if (!playbackRes.ok) {
+      addDebug(`❌ [6/6] PLAYBACK FALHOU`, `HTTP ${playbackRes.status}`);
+      return streams;
+    }
+    
+    const playbackData = await playbackRes.json();
+    if (!playbackData.playback) {
+      addDebug(`❌ [6/6] SEM PLAYBACK NA RESPOSTA`, JSON.stringify(playbackData));
+      return streams;
+    }
+    
+    addDebug(`🔓 DESCRIPTOGRAFANDO`, `Versão: ${playbackData.playback.version}`);
+    const decryptResult = decryptPlayback(playbackData.playback);
+    
+    if (decryptResult.success) {
+      addDebug(`✅ SUCESSO! URL OBTIDA`, decryptResult.url.substring(0, 100) + '...');
+      
+      // Usa a função extractStreams igual ao código do amigo
+      const videoData = decryptResult.rawData || { sources: [{ url: decryptResult.url }] };
+      if (!videoData.sources) {
+        videoData.sources = [{ url: decryptResult.url }];
+      }
+      
+      const extractedStreams = await extractStreams(videoData, "pt");
+      
+      if (extractedStreams.length > 0) {
+        streams.length = 0;
+        for (const stream of extractedStreams) {
+          streams.push(stream);
+        }
+        return streams;
+      }
+      
+      // Fallback: retorna o stream padrão
+      streams.length = 0;
+      streams.push({
+        name: "Pomfy",
+        title: "1080p",
+        url: decryptResult.url,
+        quality: 1080,
+        type: "hls",
+        headers: normalizeHeaders({
+          "User-Agent": USER_AGENT,
+          "Referer": embedUrl
+        })
+      });
+      
+      return streams;
+    } else {
+      addDebug(`❌ DESCRIPTOGRAFIA FALHOU`, decryptResult.error);
+      return streams;
+    }
+
+  } catch (e) { 
+    addDebug(`❌ ERRO CRÍTICO`, `${e.message}\n${e.stack || ''}`);
+    return streams;
+  }
+}
+
+module.exports = { getStreams };
