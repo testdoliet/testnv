@@ -1,7 +1,7 @@
 /**
  * Pomfy - Provider com Byse/9n8o
  * Versão Final: 100% Manual (Sem Buffer/Crypto)
- * DEBUG: Resultados como streams
+ * CORREÇÃO: Headers completos e type hls
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -366,7 +366,7 @@ async function convertImdbToTmdb(imdbId, mediaType) {
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL getStreams (com debug como streams)
+// FUNÇÃO PRINCIPAL getStreams
 // ==============================================
 
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -418,7 +418,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const html = await response.text();
     addDebug(`📄 [1/6] HTML RECEBIDO`, `${html.length} bytes`);
 
-    // Extrair statusToken (múltiplos padrões)
+    // Extrair statusToken
     let statusToken = null;
     const statusPatterns = [
       /const statusToken="([^"]+)"/,
@@ -492,7 +492,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const playerDomain = new URL(embedUrl).origin;
     addDebug(`✅ [4/6] PLAYER DOMAIN`, playerDomain);
 
-    // 4. Challenge (opcional)
+    // 4. Challenge
     try {
       const challengeUrl = `${playerDomain}/api/videos/access/challenge`;
       addDebug(`🔐 [5/6] CHALLENGE`, challengeUrl);
@@ -548,16 +548,29 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     if (decryptResult.success) {
       addDebug(`✅ SUCESSO! URL OBTIDA`, decryptResult.url.substring(0, 100) + '...');
       
-      // Remove todos os streams de debug e adiciona apenas o stream real
+      // HEADERS COMPLETOS IGUAL AO CÓDIGO DO AMIGO
+      const finalHeaders = {
+        "User-Agent": USER_AGENT,
+        "Origin": "https://pomfy-cdn.shop",
+        "Referer": "https://pomfy-cdn.shop/",
+        "X-Embed-Origin": "api.pomfy.stream",
+        "X-Embed-Referer": "https://api.pomfy.stream/",
+        "Accept": "*/*"
+      };
+      
+      // Remove todos os streams de debug
       streams.length = 0;
+      
+      // Adiciona o stream real com type hls
       streams.push({
         name: "Pomfy",
         title: "1080p",
         url: decryptResult.url,
-        type: "hls",
         quality: 1080,
-        headers: { "User-Agent": USER_AGENT, "Referer": embedUrl }
+        type: "hls",
+        headers: finalHeaders
       });
+      
       return streams;
     } else {
       addDebug(`❌ DESCRIPTOGRAFIA FALHOU`, decryptResult.error);
