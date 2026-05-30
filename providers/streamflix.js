@@ -1,7 +1,7 @@
 /**
  * Pomfy - Provider com Byse/9n8o
  * Versão Final: 100% Manual (Sem Buffer/Crypto)
- * FUNCIONALIDADES DO CÓDIGO DO AMIGO ADICIONADAS
+ * CORREÇÃO: Accept-Encoding: identity para evitar compressão gzip/br
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -27,13 +27,6 @@ const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const COOKIE = "SITE_TOTAL_ID=aTYqe6GU65PNmeCXpelwJwAAAMi; __dtsu=104017651574995957BEB724C6373F9E; __cc_id=a44d1e52993b9c2Oaaf40eba24989a06";
 
 const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36";
-
-// DOMAINS igual ao código do amigo
-const DOMAINS = {
-    pomfy: "https://api.pomfy.stream",
-    cdn: "https://pomfy-cdn.shop",
-    attest: "https://9n8o.com"
-};
 
 const HEADERS = {
   "User-Agent": USER_AGENT,
@@ -373,101 +366,6 @@ async function convertImdbToTmdb(imdbId, mediaType) {
 }
 
 // ==============================================
-// FUNÇÃO normalizeHeaders (igual ao código do amigo)
-// ==============================================
-
-function normalizeHeaders(srcHeaders) {
-    const headers = { ...srcHeaders };
-    if (!headers.Origin) headers.Origin = DOMAINS.cdn;
-    if (!headers.Referer) headers.Referer = `${DOMAINS.cdn}/`;
-    if (!headers["X-Embed-Origin"]) headers["X-Embed-Origin"] = "api.pomfy.stream";
-    if (!headers["X-Embed-Referer"]) headers["X-Embed-Referer"] = "https://api.pomfy.stream/";
-    return headers;
-}
-
-// ==============================================
-// FUNÇÃO headersForDomain (igual ao código do amigo)
-// ==============================================
-
-function headersForDomain(domain, extra) {
-    const h = {
-        "User-Agent": USER_AGENT,
-        "Accept": "application/json, text/html, application/xhtml+xml, */*;q=0.8",
-        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Cache-Control": "no-cache"
-    };
-    
-    if (domain === DOMAINS.cdn) {
-        h["Origin"] = DOMAINS.cdn;
-        h["Referer"] = DOMAINS.cdn + "/";
-        h["X-Embed-Origin"] = "api.pomfy.stream";
-        h["X-Embed-Referer"] = "https://api.pomfy.stream/";
-    } else if (domain === DOMAINS.attest) {
-        h["Origin"] = DOMAINS.attest;
-        h["X-Embed-Origin"] = "api.pomfy.stream";
-        h["X-Embed-Referer"] = "https://api.pomfy.stream/";
-    }
-    
-    if (extra) Object.assign(h, extra);
-    return h;
-}
-
-// ==============================================
-// FUNÇÃO extractStreams (igual ao código do amigo)
-// ==============================================
-
-function extractQuality(src) {
-    const val = src.quality ?? src.resolution ?? src.height ?? 0;
-    if (typeof val === "number" && val > 0) return val;
-    const match = String(val).match(/(\d{3,4})/);
-    return match ? parseInt(match[1], 10) : 0;
-}
-
-function extractLanguage(src, preferredLang) {
-    const lang = src.language || src.lang || src.label || preferredLang || "pt";
-    return lang;
-}
-
-async function extractStreams(playbackData, preferredLang) {
-    if (!playbackData || !playbackData.sources || !Array.isArray(playbackData.sources)) {
-        return [];
-    }
-
-    const sources = playbackData.sources;
-    const tracks = playbackData.tracks || [];
-    const baseHeaders = headersForDomain(DOMAINS.cdn);
-
-    const seen = new Set();
-    const streams = [];
-
-    for (const src of sources) {
-        const url = src.url || src.src || src.file;
-        if (!url || seen.has(url)) continue;
-        seen.add(url);
-
-        const quality = extractQuality(src);
-        const lang = extractLanguage(src, preferredLang);
-        const isHls = (src.type || "").toLowerCase().includes("hls") || url.includes(".m3u8");
-        const finalHeaders = normalizeHeaders(src.headers || baseHeaders);
-
-        const qualityLabel = quality > 0 ? `${quality}p` : "Auto";
-
-        streams.push({
-            name: "Pomfy",
-            title: `Pomfy (${qualityLabel} ${lang})`,
-            url: url,
-            quality: quality || 1080,
-            type: isHls ? "hls" : "mp4",
-            group: lang,
-            provider: "pomfy",
-            headers: finalHeaders
-        });
-    }
-
-    return streams;
-}
-
-// ==============================================
 // FUNÇÃO PRINCIPAL getStreams
 // ==============================================
 
@@ -650,34 +548,30 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     if (decryptResult.success) {
       addDebug(`✅ SUCESSO! URL OBTIDA`, decryptResult.url.substring(0, 100) + '...');
       
-      // Usa a função extractStreams igual ao código do amigo
-      const videoData = decryptResult.rawData || { sources: [{ url: decryptResult.url }] };
-      if (!videoData.sources) {
-        videoData.sources = [{ url: decryptResult.url }];
-      }
+      // HEADERS CORRIGIDOS - COM Accept-Encoding: identity
+      // Isso impede o servidor de comprimir a resposta com gzip/br
+      const finalHeaders = {
+        "User-Agent": USER_AGENT,
+        "Accept-Encoding": "identity",  // ← ESSE É O SEGREDO!
+        "Accept": "*/*",
+        "Origin": "https://pomfy-cdn.shop",
+        "Referer": "https://pomfy-cdn.shop/",
+        "X-Embed-Origin": "api.pomfy.stream",
+        "X-Embed-Referer": "https://api.pomfy.stream/",
+        "Connection": "keep-alive"
+      };
       
-      const extractedStreams = await extractStreams(videoData, "pt");
-      
-      if (extractedStreams.length > 0) {
-        streams.length = 0;
-        for (const stream of extractedStreams) {
-          streams.push(stream);
-        }
-        return streams;
-      }
-      
-      // Fallback: retorna o stream padrão
+      // Remove todos os streams de debug
       streams.length = 0;
+      
+      // Adiciona o stream real com type hls e headers corrigidos
       streams.push({
         name: "Pomfy",
         title: "1080p",
         url: decryptResult.url,
         quality: 1080,
         type: "hls",
-        headers: normalizeHeaders({
-          "User-Agent": USER_AGENT,
-          "Referer": embedUrl
-        })
+        headers: finalHeaders
       });
       
       return streams;
