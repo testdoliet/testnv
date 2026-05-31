@@ -1,31 +1,18 @@
 /**
- * Doramogo Provider - Com suporte a cookies
- * ATUALIZE OS COOKIES QUANDO EXPIRAREM
+ * Doramogo Provider - Seguindo a abordagem do Pomfy (sem headers no stream)
  */
 
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-// ==============================================
-// COOKIES (ATUALIZE QUANDO EXPIRAR)
-// Para obter novos cookies:
-// 1. Acesse https://www.doramogo.net/
-// 2. Abra DevTools > Application > Cookies
-// 3. Copie PHPSESSID e _ga
-// ==============================================
-const COOKIES = {
-    PHPSESSID: "8vf7thq8lr33f6q1sk8v1f763a",
-    _ga: "GA1.1.616884067.1772822292"
-};
-
-const COOKIE_STRING = `PHPSESSID=${COOKIES.PHPSESSID}; _ga=${COOKIES._ga}`;
-
-// HEADERS com cookies
+// Headers para REQUISIÇÕES (buscar proxies, etc.) - NÃO para o stream
 const HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) Chrome/127.0.0.0 Mobile Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,image/apng,*/*;q=0.8",
+    "Accept-Language": "pt-BR,pt;q=0.9",
     "Referer": "https://www.doramogo.net/",
-    "Cookie": COOKIE_STRING,
-    "Accept": "*/*"
+    "Origin": "https://www.doramogo.net",
+    "Cookie": "PHPSESSID=8vf7thq8lr33f6q1sk8v1f763a; _ga=GA1.1.616884067.1772822292"
 };
 
 const PROXY_SOURCE_URL = "https://www.doramogo.net/series/dream-stage-2026-legendado/temporada-1/episodio-1";
@@ -44,9 +31,6 @@ function addDebug(streams, title, content) {
     });
 }
 
-// ==============================================
-// CONVERTER IMDb → TMDB
-// ==============================================
 async function convertImdbToTmdb(imdbId, mediaType, streams) {
     addDebug(streams, "🔄 CONVERTENDO IMDb", `${imdbId}`);
     
@@ -82,9 +66,6 @@ async function convertImdbToTmdb(imdbId, mediaType, streams) {
     }
 }
 
-// ==============================================
-// EXTRAIR PROXYS
-// ==============================================
 async function fetchProxies(streams) {
     if (cachedProxies && Date.now() < proxyExpiry) {
         addDebug(streams, "💾 CACHE", `P: ${cachedProxies.primary}`);
@@ -119,15 +100,28 @@ async function fetchProxies(streams) {
     }
 }
 
-// ==============================================
-// FUNÇÃO PRINCIPAL
-// ==============================================
+async function testUrl(url, streams) {
+    addDebug(streams, "📡 TESTANDO", url.substring(0, 80) + "...");
+    
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: HEADERS
+        });
+        
+        addDebug(streams, "📡 STATUS", `HTTP ${response.status}`);
+        return response.ok || response.status === 206;
+    } catch (err) {
+        addDebug(streams, "❌ ERRO", err.message);
+        return false;
+    }
+}
+
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     const streams = [];
     
     addDebug(streams, "🎬 INÍCIO", `ID: ${tmdbId} | ${mediaType} | S${season}E${episode}`);
     
-    // Converte IMDb → TMDB
     let finalId = tmdbId;
     const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
     
@@ -135,36 +129,24 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         const convertedId = await convertImdbToTmdb(tmdbId, mediaType, streams);
         if (convertedId) {
             finalId = convertedId;
-            addDebug(streams, "✅ CONVERTIDO", finalId);
         } else {
-            addDebug(streams, "❌ FALHA", "IMDb não encontrado");
             return streams;
         }
     }
     
     try {
         const proxies = await fetchProxies(streams);
-        if (!proxies) {
-            addDebug(streams, "❌ SEM PROXYS", "Não foi possível obter os proxies");
-            return streams;
-        }
+        if (!proxies) return streams;
         
-        // Busca título TMDB
         const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
         const tmdbUrl = `${TMDB_BASE_URL}/${endpoint}/${finalId}?api_key=${TMDB_API_KEY}&language=en-US`;
         
         const tmdbResp = await fetch(tmdbUrl);
-        if (!tmdbResp.ok) {
-            addDebug(streams, "❌ TMDB", `HTTP ${tmdbResp.status}`);
-            return streams;
-        }
+        if (!tmdbResp.ok) return streams;
         
         const tmdbData = await tmdbResp.json();
         const title = mediaType === 'tv' ? tmdbData.name : tmdbData.title;
         
-        addDebug(streams, "📺 TÍTULO", title);
-        
-        // Gera slug
         const slug = title.toLowerCase()
             .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
             .replace(/[^a-z0-9]+/g, '-')
@@ -184,35 +166,25 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             `${proxies.fallback}/${streamPath}`
         ];
         
-        addDebug(streams, "🔨 SLUG", slug);
-        addDebug(streams, "📡 URLS", urlsToTry.length);
-        
         for (const url of urlsToTry) {
-            addDebug(streams, "📡 TESTANDO", url.substring(0, 100) + "...");
+            const isValid = await testUrl(url, streams);
             
-            try {
-                const response = await fetch(url, {
-                    method: 'GET',
-                    headers: HEADERS
+            if (isValid) {
+                addDebug(streams, "✅ STREAM ENCONTRADO", url.substring(0, 100));
+                
+                // ==============================================
+                // IGUAL AO POMFY: SEM HEADERS NO STREAM!
+                // Deixa o Nuvio gerenciar os headers automaticamente
+                // ==============================================
+                streams.push({
+                    name: "Doramogo",
+                    title: "1080p",
+                    url: url,
+                    quality: 1080,
+                    type: "hls"
+                    // SEM HEADERS!
                 });
-                
-                addDebug(streams, "📡 STATUS", `HTTP ${response.status}`);
-                
-                if (response.ok || response.status === 206) {
-                    addDebug(streams, "✅ STREAM ENCONTRADO", url.substring(0, 100));
-                    
-                    // Stream SEM headers extras (deixa o Nuvio gerenciar)
-                    streams.push({
-                        name: "Doramogo",
-                        title: "1080p",
-                        url: url,
-                        quality: 1080,
-                        type: "hls"
-                    });
-                    return streams;
-                }
-            } catch (err) {
-                addDebug(streams, "❌ ERRO", err.message);
+                return streams;
             }
         }
         
@@ -220,7 +192,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         return streams;
         
     } catch (err) {
-        addDebug(streams, "❌ ERRO CRÍTICO", err.message);
+        addDebug(streams, "❌ ERRO", err.message);
         return streams;
     }
 }
