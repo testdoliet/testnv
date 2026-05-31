@@ -1,16 +1,15 @@
 /**
  * PlayerFlix Provider - WatchPlayer + VIP Player
- * Com anti-detecção (sem delays)
+ * Sem headers personalizados (deixa o Nuvio gerenciar)
  */
 
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
 // ==============================================
-// ANTI-DETECÇÃO (sem delays)
+// ANTI-DETECÇÃO (apenas User-Agent rotativo)
 // ==============================================
 
-// User-Agent rotativo
 const getUserAgent = () => {
   const agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -21,23 +20,12 @@ const getUserAgent = () => {
   return agents[Math.floor(Math.random() * agents.length)];
 };
 
-// Headers padrão (simulam navegador real)
 const getHeaders = (referer, isApi = false) => {
   const userAgent = getUserAgent();
   
-  const common = {
-    "User-Agent": userAgent,
-    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-    "Sec-Ch-Ua-Mobile": "?0",
-    "Sec-Ch-Ua-Platform": '"Windows"'
-  };
-  
   if (isApi) {
     return {
-      ...common,
-      "Accept": "*/*",
+      "User-Agent": userAgent,
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
       "X-Requested-With": "XMLHttpRequest",
       "Origin": "https://embedplayer2.xyz",
@@ -46,7 +34,7 @@ const getHeaders = (referer, isApi = false) => {
   }
   
   return {
-    ...common,
+    "User-Agent": userAgent,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Referer": referer || "https://playerflix.ink/",
     "Origin": "https://playerflix.ink"
@@ -89,11 +77,15 @@ async function convertImdbToTmdb(imdbId, mediaType) {
 // ==============================================
 // FUNÇÃO: Extrair todas as qualidades do .m3u8
 // ==============================================
-async function extractAllQualities(m3u8Url, headers) {
+async function extractAllQualities(m3u8Url) {
   const qualities = [];
   
   try {
-    const resp = await fetch(m3u8Url, { headers });
+    const resp = await fetch(m3u8Url, {
+      headers: {
+        "User-Agent": getUserAgent()
+      }
+    });
     if (!resp.ok) return qualities;
     
     const content = await resp.text();
@@ -274,22 +266,17 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         }
         
         if (watchUrl.includes('.m3u8') || watchUrl.includes('/hls/')) {
+          // WatchPlayer: SEM headers personalizados
           streams.push({
             name: "WatchPlayer",
             title: "720p",
             url: watchUrl,
             quality: 720,
-            type: "hls",
-            headers: {
-              "User-Agent": getUserAgent(),
-              "Accept-Encoding": "identity",
-              "Referer": "https://watchplayer.xyz/",
-              "Origin": "https://watchplayer.xyz"
-            }
+            type: "hls"
           });
         }
       } catch (err) {
-        // WatchPlayer falhou silenciosamente
+        // WatchPlayer falhou
       }
     }
     
@@ -313,25 +300,17 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             const vipData = await vipResp.json();
             
             if (vipData.securedLink) {
-              const qualities = await extractAllQualities(vipData.securedLink, {
-                "User-Agent": getUserAgent(),
-                "Accept-Encoding": "identity"
-              });
+              const qualities = await extractAllQualities(vipData.securedLink);
               
               if (qualities.length > 0) {
+                // VIP Player: SEM headers personalizados
                 for (const q of qualities) {
                   streams.push({
                     name: "VIP Player",
                     title: q.label,
                     url: q.url,
                     quality: q.quality,
-                    type: "hls",
-                    headers: {
-                      "User-Agent": getUserAgent(),
-                      "Accept-Encoding": "identity",
-                      "Referer": "https://embedplayer2.xyz/",
-                      "Origin": "https://embedplayer2.xyz"
-                    }
+                    type: "hls"
                   });
                 }
               } else {
@@ -340,20 +319,14 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                   title: "720p",
                   url: vipData.securedLink,
                   quality: 720,
-                  type: "hls",
-                  headers: {
-                    "User-Agent": getUserAgent(),
-                    "Accept-Encoding": "identity",
-                    "Referer": "https://embedplayer2.xyz/",
-                    "Origin": "https://embedplayer2.xyz"
-                  }
+                  type: "hls"
                 });
               }
             }
           }
         }
       } catch (err) {
-        // VIP Player falhou silenciosamente
+        // VIP Player falhou
       }
     }
     
