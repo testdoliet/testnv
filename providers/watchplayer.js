@@ -1,6 +1,7 @@
 /**
- * WatchPlayer Provider - Versão Corrigida (sem Buffer)
- * Baseado no Pomfy que funciona no Nuvio
+ * WatchPlayer Provider - Versão Simplificada
+ * Qualidade fixa: 720p (igual Pomfy, mas com label fixa)
+ * Sem detecção complexa, apenas o essencial
  */
 
 // Cache em memória
@@ -12,29 +13,6 @@ const CACHE_TTL = 5 * 60 * 1000;
 // ==============================================
 
 const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-function base64ToBytes(base64) {
-  let b64 = base64.replace(/-/g, '+').replace(/_/g, '/');
-  while (b64.length % 4 !== 0) b64 += '=';
-  const lookup = new Uint8Array(256).fill(255);
-  for (let i = 0; i < 64; i++) lookup[BASE64_CHARS.charCodeAt(i)] = i;
-  const len = b64.length;
-  let outputLen = (len * 3) >> 2;
-  if (b64[len - 1] === '=') outputLen--;
-  if (b64[len - 2] === '=') outputLen--;
-  const bytes = new Uint8Array(outputLen);
-  let byteIdx = 0;
-  for (let i = 0; i < len; i += 4) {
-    const a = lookup[b64.charCodeAt(i)];
-    const b = lookup[b64.charCodeAt(i + 1)];
-    const c = lookup[b64.charCodeAt(i + 2)];
-    const d = lookup[b64.charCodeAt(i + 3)];
-    if (byteIdx < outputLen) bytes[byteIdx++] = (a << 2) | (b >> 4);
-    if (byteIdx < outputLen) bytes[byteIdx++] = ((b & 0x0f) << 4) | (c >> 2);
-    if (byteIdx < outputLen) bytes[byteIdx++] = ((c & 0x03) << 6) | d;
-  }
-  return bytes;
-}
 
 function bytesToBase64(bytes) {
   let result = '';
@@ -71,7 +49,7 @@ function stringToUtf8Bytes(str) {
 }
 
 // ==============================================
-// ANTI-DETECÇÃO (inspirado no Pomfy)
+// ANTI-DETECÇÃO
 // ==============================================
 
 const randomDelay = (min = 100, max = 500) => {
@@ -116,11 +94,10 @@ const getUserAgent = () => {
 };
 
 const getHtmlHeaders = (referer) => {
-  const userAgent = getUserAgent();
   const fingerprint = generateFingerprint();
   
   return {
-    "User-Agent": userAgent,
+    "User-Agent": getUserAgent(),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "pt-BR,pt;q=0.9",
     "Referer": referer || "https://playerflix.ink/",
@@ -130,11 +107,10 @@ const getHtmlHeaders = (referer) => {
 };
 
 const getApiHeaders = (referer) => {
-  const userAgent = getUserAgent();
   const fingerprint = generateFingerprint();
   
   return {
-    "User-Agent": userAgent,
+    "User-Agent": getUserAgent(),
     "Accept": "*/*",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "X-Requested-With": "XMLHttpRequest",
@@ -156,32 +132,10 @@ const getStreamHeaders = () => {
 };
 
 // ==============================================
-// DETECÇÃO DE QUALIDADE POR PADRÃO NA URL (simples)
-// ==============================================
-
-const detectQualityByUrl = (url) => {
-  const urlLower = url.toLowerCase();
-  
-  if (urlLower.includes('1080') || urlLower.includes('fhd') || urlLower.includes('1920')) {
-    return { label: '1080p', value: 1080 };
-  } else if (urlLower.includes('720') || urlLower.includes('hd')) {
-    return { label: '720p', value: 720 };
-  } else if (urlLower.includes('480') || urlLower.includes('sd')) {
-    return { label: '480p', value: 480 };
-  } else if (urlLower.includes('360')) {
-    return { label: '360p', value: 360 };
-  }
-  
-  return { label: '1080p', value: 1080 };
-};
-
-// ==============================================
 // FUNÇÃO PRINCIPAL
 // ==============================================
 
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
-  const streams = [];
-
   try {
     // Cache check
     const cacheKey = `${mediaType}:${tmdbId}:${season}:${episode}`;
@@ -192,7 +146,6 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       }
     }
 
-    // Delay inicial
     await randomDelay(100, 300);
 
     // Monta URL
@@ -214,15 +167,20 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
 
     if (mediaType === "movie") {
       // Filmes: pega data-id
-      const match = html.match(/<div class="player_select_item" data-id="(\d+)">/);
+      const match = html.match(/data-id="(\d+)"/);
       if (match) videoId = match[1];
     } else {
-      // Séries: content_id + options
+      // Séries: pega content-id do episódio
       const s = season || 1;
       const e = episode || 1;
       
-      const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
-      const match = html.match(pattern);
+      let pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
+      let match = html.match(pattern);
+      
+      if (!match) {
+        pattern = new RegExp(`data-season="${s}"[^>]*data-episode="${e}"[^>]*data-contentid="(\\d+)"`);
+        match = html.match(pattern);
+      }
       
       if (!match) return [];
       
@@ -230,6 +188,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       
       await randomDelay(150, 400);
       
+      // Busca options
       const optsResp = await fetch("https://watchplayer.xyz/api", {
         method: "POST",
         headers: getApiHeaders(url),
@@ -263,20 +222,15 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     if (!playerData.data?.video_url) return [];
     
     const videoUrl = playerData.data.video_url;
-    
-    // Detecta qualidade
-    const quality = detectQualityByUrl(videoUrl);
 
-    // Headers para o stream
-    const streamHeaders = getStreamHeaders();
-
+    // Qualidade fixa: 720p
     const result = [{
       name: "WatchPlayer",
-      title: quality.label,
+      title: "720p",
       url: videoUrl,
-      quality: quality.value,
+      quality: 720,
       type: "hls",
-      headers: streamHeaders
+      headers: getStreamHeaders()
     }];
 
     // Salva cache
