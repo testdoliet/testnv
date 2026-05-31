@@ -12,6 +12,48 @@ function log(...args) {
     }
 }
 
+// ==================== CONVERSOR IMDb → TMDB ====================
+async function convertImdbToTmdb(imdbId, mediaType) {
+    log(`🔄 Convertendo IMDb: ${imdbId} → TMDB`);
+    
+    try {
+        const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+        const response = await fetch(url, {
+            headers: { 
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json" 
+            }
+        });
+        
+        if (!response.ok) {
+            log(`   ❌ HTTP ${response.status}`);
+            return null;
+        }
+        
+        const data = await response.json();
+        
+        if (mediaType === "movie") {
+            if (data.movie_results && data.movie_results.length > 0) {
+                const tmdbId = data.movie_results[0].id;
+                log(`   ✅ Convertido para TMDB: ${tmdbId} (filme)`);
+                return tmdbId;
+            }
+        } else {
+            if (data.tv_results && data.tv_results.length > 0) {
+                const tmdbId = data.tv_results[0].id;
+                log(`   ✅ Convertido para TMDB: ${tmdbId} (série)`);
+                return tmdbId;
+            }
+        }
+        
+        log(`   ❌ Nenhum resultado encontrado`);
+        return null;
+    } catch (error) {
+        log(`   ❌ Erro: ${error.message}`);
+        return null;
+    }
+}
+
 // ==================== FUNÇÕES UTILITÁRIAS BÁSICAS ====================
 
 function titleToSlug(title) {
@@ -383,6 +425,22 @@ function extractPartNumberFromTitle(title) {
 // ==================== FUNÇÃO PRINCIPAL ====================
 
 async function getStreams(tmdbId, mediaType, season, episode) {
+    // ==================== CONVERSÃO IMDb → TMDB ====================
+    let finalId = tmdbId;
+    const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
+    
+    if (isImdb) {
+        console.log(`\n🔄 IMDb detectado: ${tmdbId}`);
+        const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
+        if (convertedId) {
+            finalId = convertedId;
+            console.log(`✅ Usando TMDB ID: ${finalId}`);
+        } else {
+            console.log(`❌ Falha na conversão do IMDb ID`);
+            return [];
+        }
+    }
+    
     const targetSeason = season;
     const targetEpisode = episode;
     const epPadded = targetEpisode.toString().padStart(2, '0');
@@ -390,7 +448,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     console.log('\n' + '='.repeat(60));
     console.log('🚀 BUSCANDO STREAMS');
     console.log('='.repeat(60));
-    console.log(`📺 TMDB ID: ${tmdbId}`);
+    console.log(`📺 TMDB ID: ${finalId}`);
     console.log(`📅 Temporada: ${targetSeason}`);
     console.log(`🎯 Episódio: ${targetEpisode}`);
     console.log('-'.repeat(40));
@@ -400,9 +458,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         
         // ========== PASSO 1: TMDB ==========
         console.log('\n📥 PASSO 1: Buscando TMDB...');
-        const tmdbEnglishTitle = await getTMDBEnglishTitle(tmdbId);
-        const tmdbOriginalTitle = await getTMDBOriginalTitle(tmdbId);
-        const tmdbSeasonName = await getTMDBSeasonName(tmdbId, targetSeason);
+        const tmdbEnglishTitle = await getTMDBEnglishTitle(finalId);
+        const tmdbOriginalTitle = await getTMDBOriginalTitle(finalId);
+        const tmdbSeasonName = await getTMDBSeasonName(finalId, targetSeason);
         
         if (!tmdbEnglishTitle && !tmdbOriginalTitle) {
             console.log('❌ Erro: Título TMDB não encontrado');
@@ -677,7 +735,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         // ========== PASSO 6: ÚLTIMO RECURSO - EPISÓDIOS ABSOLUTOS ==========
         console.log('\n📥 PASSO 6: Tentando com episódios absolutos...');
         
-        const seasonsInfo = await getTMDBSeasonsInfo(tmdbId);
+        const seasonsInfo = await getTMDBSeasonsInfo(finalId);
         
         if (seasonsInfo?.length) {
             const absoluteEpisode = calculateAbsoluteEpisode(seasonsInfo, targetSeason, targetEpisode);
