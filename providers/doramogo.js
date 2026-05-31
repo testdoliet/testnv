@@ -1,5 +1,5 @@
 /**
- * Doramogo Provider - Com headers completos (igual Kotlin)
+ * Doramogo Provider - Com conversão IMDb → TMDB e headers completos
  */
 
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
@@ -29,7 +29,38 @@ let proxyExpiry = 0;
 const PROXY_CACHE_TIME = 60 * 60 * 1000; // 1 hora
 
 // ==============================================
-// 1. EXTRAIR PROXYS (com headers completos)
+// 1. CONVERTER IMDb → TMDB
+// ==============================================
+async function convertImdbToTmdb(imdbId, mediaType) {
+    try {
+        const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+        const response = await fetch(url, {
+            headers: { "User-Agent": HEADERS["user-agent"], "Accept": "application/json" }
+        });
+        
+        if (!response.ok) return null;
+        
+        const data = await response.json();
+        
+        if (mediaType === "movie") {
+            if (data.movie_results && data.movie_results.length > 0) {
+                return data.movie_results[0].id;
+            }
+        } else {
+            if (data.tv_results && data.tv_results.length > 0) {
+                return data.tv_results[0].id;
+            }
+        }
+        
+        return null;
+    } catch (err) {
+        console.log(`[Doramogo] ❌ Erro conversão IMDb: ${err.message}`);
+        return null;
+    }
+}
+
+// ==============================================
+// 2. EXTRAIR PROXYS
 // ==============================================
 async function fetchProxies() {
     if (cachedProxies && Date.now() < proxyExpiry) {
@@ -71,32 +102,28 @@ async function fetchProxies() {
 }
 
 // ==============================================
-// 2. TESTAR URL (com headers completos)
+// 3. TESTAR URL
 // ==============================================
 async function testStreamUrl(url) {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
         
-        // Usa os MESMOS headers que o Kotlin usa
         const response = await fetch(url, {
-            method: 'GET',  // Kotlin usa GET, não HEAD
+            method: 'GET',
             headers: HEADERS,
             signal: controller.signal
         });
         
         clearTimeout(timeoutId);
-        
-        console.log(`[Doramogo] 📡 Response: ${response.status}`);
         return response.ok || response.status === 206;
     } catch (err) {
-        console.log(`[Doramogo] ❌ Erro: ${err.message}`);
         return false;
     }
 }
 
 // ==============================================
-// 3. EXTRAIR QUALIDADES
+// 4. EXTRAIR QUALIDADES
 // ==============================================
 async function extractQualitiesFromM3u8(url) {
     try {
@@ -133,7 +160,7 @@ async function extractQualitiesFromM3u8(url) {
 }
 
 // ==============================================
-// 4. FUNÇÕES AUXILIARES
+// 5. FUNÇÕES AUXILIARES
 // ==============================================
 function titleToSlug(title) {
     if (!title) return '';
@@ -192,19 +219,38 @@ async function getTMDBTitle(tmdbId, mediaType) {
 }
 
 // ==============================================
-// 5. FUNÇÃO PRINCIPAL
+// 6. FUNÇÃO PRINCIPAL
 // ==============================================
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     const streams = [];
     
     console.log(`\n[Doramogo] 🎬 INICIANDO`);
-    console.log(`[Doramogo] 📺 ID: ${tmdbId} | S${season}E${episode}`);
+    
+    // ==============================================
+    // CONVERTE IMDb → TMDB se necessário
+    // ==============================================
+    let finalId = tmdbId;
+    const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
+    
+    if (isImdb) {
+        console.log(`[Doramogo] 🔄 Convertendo IMDb: ${tmdbId}`);
+        const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
+        if (convertedId) {
+            finalId = convertedId;
+            console.log(`[Doramogo] ✅ Convertido para TMDB: ${finalId}`);
+        } else {
+            console.log(`[Doramogo] ❌ Falha na conversão IMDb`);
+            return [];
+        }
+    }
+    
+    console.log(`[Doramogo] 📺 TMDB ID: ${finalId} | Tipo: ${mediaType} | S${season}E${episode}`);
     
     try {
         const proxies = await fetchProxies();
         if (!proxies) return [];
         
-        const info = await getTMDBTitle(tmdbId, mediaType);
+        const info = await getTMDBTitle(finalId, mediaType);
         if (!info) return [];
         
         const targetSeason = mediaType === 'movie' ? 1 : season;
@@ -214,6 +260,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         const timestamp = Date.now();
         
         const slugVariations = generateSlugVariations(info.title, targetSeason, info.ano);
+        console.log(`[Doramogo] 🔨 ${slugVariations.length} slugs gerados`);
         
         for (const slug of slugVariations) {
             const firstLetter = slug.charAt(0).toUpperCase() || 'T';
@@ -225,10 +272,10 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             ];
             
             for (const url of urlsToTry) {
-                console.log(`[Doramogo] 📡 Testando: ${url.substring(0, 100)}...`);
+                console.log(`[Doramogo] 📡 Testando...`);
                 
                 if (await testStreamUrl(url)) {
-                    console.log(`[Doramogo] ✅ Funcionou!`);
+                    console.log(`[Doramogo] ✅ Funcionou! Slug: ${slug}`);
                     
                     const qualities = await extractQualitiesFromM3u8(url);
                     
@@ -240,7 +287,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                                 url: q.url,
                                 quality: q.height,
                                 type: "hls",
-                                headers: HEADERS
+                                headers: HEADERS  // HEADERS no stream!
                             });
                         }
                     } else {
@@ -250,7 +297,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                             url: url,
                             quality: 720,
                             type: "hls",
-                            headers: HEADERS
+                            headers: HEADERS  // HEADERS no stream!
                         });
                     }
                     return streams;
