@@ -1,256 +1,229 @@
 /**
- * WatchPlayer Provider - Versão Anti-Detecção
- * Com delay aleatório, cache e headers realistas
+ * WatchPlayer Provider - Versão Manual para quick.js (Nuvio)
+ * Baseado no fluxo que funcionou nos testes
+ * Sem dependências externas, tudo manual
  */
 
-// Cache em memória (válido por 5 minutos)
+// Cache simples em memória
 const cache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
-// Delay aleatório entre 100ms e 800ms
-const randomDelay = () => {
-  const delay = Math.floor(Math.random() * 700) + 100;
-  return new Promise(resolve => setTimeout(resolve, delay));
+// Delay manual (se existir sleep no ambiente)
+const sleep = (ms) => {
+  if (typeof $sleep !== 'undefined') return $sleep(ms);
+  if (typeof sleep !== 'undefined') return sleep(ms);
+  // Fallback: loop vazio (não ideal, mas funciona)
+  const start = Date.now();
+  while (Date.now() - start < ms) {}
 };
 
-// Gera User-Agent aleatório (rotativo)
-const getUserAgent = () => {
-  const uas = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-  ];
-  return uas[Math.floor(Math.random() * uas.length)];
-};
-
-// Headers realistas para navegador
-const getBrowserHeaders = (referer) => {
-  const userAgent = getUserAgent();
-  const isWindows = userAgent.includes("Windows");
-  const isMobile = userAgent.includes("Android") || userAgent.includes("iPhone");
+// Função para classificar qualidade manualmente
+const classifyQuality = (url) => {
+  const urlLower = url.toLowerCase();
   
-  return {
-    "User-Agent": userAgent,
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Cache-Control": "max-age=0",
-    "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-    "Sec-Ch-Ua-Mobile": isMobile ? "?1" : "?0",
-    "Sec-Ch-Ua-Platform": isWindows ? '"Windows"' : (isMobile ? '"Android"' : '"macOS"'),
-    "Sec-Fetch-Dest": "iframe",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "cross-site",
-    "Sec-Fetch-User": "?1",
-    "Upgrade-Insecure-Requests": "1",
-    "Referer": referer || "https://playerflix.ink/",
-    "Origin": "https://watchplayer.xyz"
-  };
-};
-
-// Headers para API (XHR/fetch)
-const getApiHeaders = (referer) => ({
-  "User-Agent": getUserAgent(),
-  "Accept": "*/*",
-  "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-  "Accept-Encoding": "gzip, deflate, br",
-  "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-  "Origin": "https://watchplayer.xyz",
-  "Referer": referer,
-  "Sec-Ch-Ua": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-  "Sec-Ch-Ua-Mobile": "?0",
-  "Sec-Ch-Ua-Platform": '"Windows"',
-  "Sec-Fetch-Dest": "empty",
-  "Sec-Fetch-Mode": "cors",
-  "Sec-Fetch-Site": "same-origin",
-  "X-Requested-With": "XMLHttpRequest"
-});
-
-// Cache helper
-const getCached = (key) => {
-  const cached = cache.get(key);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
+  // Detecção por padrões na URL
+  if (urlLower.includes('1080') || urlLower.includes('hd') || urlLower.includes('fhd')) {
+    return '1080p';
+  } else if (urlLower.includes('720') || urlLower.includes('hd720')) {
+    return '720p';
+  } else if (urlLower.includes('480') || urlLower.includes('sd')) {
+    return '480p';
+  } else if (urlLower.includes('360')) {
+    return '360p';
   }
-  return null;
+  
+  // Por padrão, assume 1080p (mais comum)
+  return '1080p';
 };
 
-const setCached = (key, data) => {
-  cache.set(key, { data, timestamp: Date.now() });
-};
-
-/**
- * Função principal getStreams
- */
+// Função principal
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
   const streams = [];
-  
+  const debug = [];
+
   const addDebug = (title, content) => {
-    streams.push({
-      name: "WatchPlayer [DEBUG]",
-      title: title,
-      url: typeof content === 'object' ? JSON.stringify(content) : String(content),
-      quality: 0,
-      headers: {}
-    });
+    debug.push({ title, content: String(content).substring(0, 200) });
   };
 
-  addDebug(`🔍 INICIANDO BUSCA`, `${mediaType} ${tmdbId}`);
+  addDebug("🔍 INICIANDO", `${mediaType} ${tmdbId}`);
 
   try {
-    // Delay inicial para simular navegador real
-    await randomDelay();
+    // Cache key
+    const cacheKey = `${mediaType}:${tmdbId}:${season}:${episode}`;
     
+    // Verifica cache
+    if (cache.has(cacheKey)) {
+      const cached = cache.get(cacheKey);
+      if (Date.now() - cached.timestamp < CACHE_TTL) {
+        addDebug("💾 CACHE", "Usando resultado em cache");
+        return cached.data;
+      }
+    }
+
+    // Delay inicial (simula navegador)
+    await sleep(100 + Math.random() * 200);
+
+    // Monta URL
     let url;
     if (mediaType === "movie") {
       url = `https://watchplayer.xyz/movie/${tmdbId}`;
-      addDebug(`📡 BUSCANDO FILME`, url);
     } else {
-      const seasonNum = season || 1;
-      const episodeNum = episode || 1;
-      url = `https://watchplayer.xyz/tvshow/${tmdbId}/${seasonNum}/${episodeNum}`;
-      addDebug(`📡 BUSCANDO SÉRIE`, `${url} (T${seasonNum}E${episodeNum})`);
+      const s = season || 1;
+      const e = episode || 1;
+      url = `https://watchplayer.xyz/tvshow/${tmdbId}/${s}/${e}`;
     }
+    addDebug("📡 URL", url);
 
-    // Verifica cache
-    const cacheKey = `${mediaType}:${tmdbId}:${season}:${episode}`;
-    const cachedResult = getCached(cacheKey);
-    if (cachedResult) {
-      addDebug(`💾 USANDO CACHE`, `Key: ${cacheKey}`);
-      streams.length = 0;
-      return cachedResult;
-    }
+    // Headers padrão
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "pt-BR,pt;q=0.9",
+      "Referer": "https://playerflix.ink/",
+      "Origin": "https://watchplayer.xyz"
+    };
 
-    // Headers com referer correto
-    const htmlHeaders = getBrowserHeaders(url);
-    addDebug(`📋 HEADERS`, `User-Agent: ${htmlHeaders["User-Agent"].substring(0, 50)}...`);
-
-    const htmlResp = await fetch(url, { headers: htmlHeaders });
-    
+    // Busca HTML
+    const htmlResp = await fetch(url, { headers });
     if (!htmlResp.ok) {
-      addDebug(`❌ FALHA HTTP`, `Status: ${htmlResp.status}`);
-      return streams;
+      addDebug("❌ ERRO", `HTTP ${htmlResp.status}`);
+      return [];
     }
-
-    // Delay após primeira requisição
-    await randomDelay();
 
     const html = await htmlResp.text();
-    addDebug(`📄 HTML`, `${html.length} bytes`);
+    addDebug("📄 HTML", `${html.length} bytes`);
 
     let videoId = null;
 
+    // ========== EXTRAI VIDEO_ID ==========
     if (mediaType === "movie") {
-      // FILMES: extrai data-id
-      const movieMatch = html.match(/<div class="player_select_item" data-id="(\d+)">/);
-      if (movieMatch) {
-        videoId = movieMatch[1];
-        addDebug(`✅ VIDEO_ID ENCONTRADO (FILME)`, videoId);
+      // Filmes: pega data-id direto
+      const match = html.match(/<div class="player_select_item" data-id="(\d+)">/);
+      if (match) {
+        videoId = match[1];
+        addDebug("✅ VIDEO_ID (FILME)", videoId);
       }
     } else {
-      // SÉRIES: extrai content_id
-      const seasonNum = season || 1;
-      const episodeNum = episode || 1;
+      // Séries: pega content_id primeiro
+      const s = season || 1;
+      const e = episode || 1;
       
-      const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${seasonNum}"[^>]*data-episode="${episodeNum}"`);
+      // Regex manual que funciona com a ordem data-contentid primeiro
+      const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
       const match = html.match(pattern);
       
       if (!match) {
-        addDebug(`❌ CONTENT_ID NÃO ENCONTRADO`, `T${seasonNum}E${episodeNum}`);
-        return streams;
+        addDebug("❌ CONTENT_ID", `T${s}E${e} não encontrado`);
+        return [];
       }
       
       const contentId = match[1];
-      addDebug(`✅ CONTENT_ID ENCONTRADO (SÉRIE)`, contentId);
+      addDebug("✅ CONTENT_ID", contentId);
       
       // Delay antes da API
-      await randomDelay();
+      await sleep(100 + Math.random() * 150);
       
       // Busca options via API
-      const apiHeaders = getApiHeaders(url);
+      const apiHeaders = {
+        "User-Agent": headers["User-Agent"],
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Requested-With": "XMLHttpRequest",
+        "Referer": url,
+        "Origin": "https://watchplayer.xyz"
+      };
+      
       const optsResp = await fetch("https://watchplayer.xyz/api", {
         method: "POST",
         headers: apiHeaders,
         body: `action=getOptions&contentid=${contentId}`
       });
       
-      // Delay pós-requisição
-      await randomDelay();
-      
-      const optsData = await optsResp.json();
-      addDebug(`📦 OPTIONS RESPONSE`, optsData);
-      
-      if (!optsData.data?.options?.length) {
-        addDebug(`❌ NENHUMA OPÇÃO DISPONÍVEL`, optsData);
-        return streams;
+      if (!optsResp.ok) {
+        addDebug("❌ OPTIONS", `HTTP ${optsResp.status}`);
+        return [];
       }
       
-      videoId = optsData.data.options[0].ID;
-      addDebug(`✅ VIDEO_ID VIA OPTIONS`, videoId);
+      const optsData = await optsResp.json();
+      
+      if (optsData.data?.options?.length) {
+        videoId = optsData.data.options[0].ID;
+        addDebug("✅ VIDEO_ID (SÉRIE)", videoId);
+      }
     }
 
     if (!videoId) {
-      addDebug(`❌ VIDEO_ID NÃO ENCONTRADO`, `Tipo: ${mediaType}`);
-      return streams;
+      addDebug("❌ VIDEO_ID", "Não encontrado");
+      return [];
     }
 
     // Delay antes da última requisição
-    await randomDelay();
+    await sleep(100 + Math.random() * 150);
 
-    // Busca a URL do player
-    addDebug(`📡 BUSCANDO PLAYER`, `video_id: ${videoId}`);
+    // ========== BUSCA URL DO PLAYER ==========
+    const playerHeaders = {
+      "User-Agent": headers["User-Agent"],
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Requested-With": "XMLHttpRequest",
+      "Referer": url,
+      "Origin": "https://watchplayer.xyz"
+    };
     
-    const playerHeaders = getApiHeaders(url);
     const playerResp = await fetch("https://watchplayer.xyz/api", {
       method: "POST",
       headers: playerHeaders,
       body: `action=getPlayer&video_id=${videoId}`
     });
-
+    
+    if (!playerResp.ok) {
+      addDebug("❌ PLAYER", `HTTP ${playerResp.status}`);
+      return [];
+    }
+    
     const playerData = await playerResp.json();
-    addDebug(`📦 PLAYER RESPONSE`, playerData);
     
     if (!playerData.data?.video_url) {
-      addDebug(`❌ URL NÃO ENCONTRADA`, playerData);
-      return streams;
+      addDebug("❌ URL", "Não encontrada");
+      return [];
     }
-
+    
     const videoUrl = playerData.data.video_url;
-    addDebug(`✅ URL OBTIDA`, videoUrl);
+    addDebug("✅ URL", videoUrl.substring(0, 80));
 
-    // Headers para o stream final (sem compressão)
+    // ========== CLASSIFICA QUALIDADE MANUALMENTE ==========
+    const quality = classifyQuality(videoUrl);
+    addDebug("🎯 QUALIDADE", quality);
+
+    // Headers para o stream final
     const streamHeaders = {
-      "User-Agent": getUserAgent(),
+      "User-Agent": headers["User-Agent"],
       "Accept-Encoding": "identity",
       "Accept": "*/*",
       "Origin": "https://watchplayer.xyz",
       "Referer": "https://watchplayer.xyz/",
-      "Connection": "keep-alive",
-      "Cache-Control": "no-cache"
+      "Connection": "keep-alive"
     };
 
-    // Remove debug streams
-    streams.length = 0;
-
+    // ========== MONTA RESULTADO ==========
     const result = [{
       name: "WatchPlayer",
-      title: "1080p",
+      title: quality,
       url: videoUrl,
-      quality: 1080,
+      quality: quality === "1080p" ? 1080 : (quality === "720p" ? 720 : 480),
       type: "hls",
       headers: streamHeaders
     }];
 
     // Salva no cache
-    setCached(cacheKey, result);
-    addDebug(`💾 CACHE SALVO`, `Key: ${cacheKey} (válido por ${CACHE_TTL/1000}s)`);
+    cache.set(cacheKey, {
+      data: result,
+      timestamp: Date.now()
+    });
 
     return result;
 
-  } catch (e) {
-    addDebug(`❌ ERRO`, e.message);
-    return streams;
+  } catch (err) {
+    addDebug("❌ ERRO CRÍTICO", err.message);
+    return [];
   }
 }
 
