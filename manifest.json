@@ -156,6 +156,40 @@
         "4k",
         "nacionais"
       ]
+    },
+    {
+      "id": "watchplayer",
+      "name": "WatchPlayer",
+      "description": "WatchPlayer - Streaming de Séries e Filmes com tecnologia P2P/WebTorrent. True Detective, The Walking Dead e muito mais!",
+      "version": "1.0.0",
+      "author": "lawlietbr",
+      "supportedTypes": [
+        "tv",
+        "movie"
+      ],
+      "filename": "providers/watchplayer.js",
+      "enabled": true,
+      "logo": "https://watchplayer.xyz/favicon.ico",
+      "contentLanguage": [
+        "pt-br"
+      ],
+      "formats": [
+        "hls",
+        "m3u8"
+      ],
+      "limited": false,
+      "disabledPlatforms": [],
+      "supportsExternalPlayer": true,
+      "tags": [
+        "filmes",
+        "séries",
+        "doramas",
+        "animes",
+        "dublado",
+        "legendado",
+        "p2p",
+        "webtorrent"
+      ]
     }
   ]
 }
