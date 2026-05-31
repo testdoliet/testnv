@@ -1,16 +1,38 @@
 /**
  * PlayerFlix Provider - WatchPlayer + VIP Player
- * Com detecção de qualidade (sem extrair streams separados)
+ * Nomes: Stream 1 (WatchPlayer) e Stream 2 (VIP Player)
+ * Com User-Agent rotativo
  */
 
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// ==============================================
+// USER-AGENT ROTATIVO
+// ==============================================
+const USER_AGENTS = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+];
+
+let currentUserAgentIndex = 0;
+
+function getUserAgent() {
+  // Rotaciona entre os User-Agents
+  const ua = USER_AGENTS[currentUserAgentIndex];
+  currentUserAgentIndex = (currentUserAgentIndex + 1) % USER_AGENTS.length;
+  return ua;
+}
 
 const getHeaders = (referer, isApi = false) => {
+  const userAgent = getUserAgent();
+  
   if (isApi) {
     return {
-      "User-Agent": USER_AGENT,
+      "User-Agent": userAgent,
       "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
       "X-Requested-With": "XMLHttpRequest",
       "Origin": "https://embedplayer2.xyz",
@@ -19,7 +41,7 @@ const getHeaders = (referer, isApi = false) => {
   }
   
   return {
-    "User-Agent": USER_AGENT,
+    "User-Agent": userAgent,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "pt-BR,pt;q=0.9",
     "Referer": referer || "https://playerflix.ink/",
@@ -31,7 +53,7 @@ async function convertImdbToTmdb(imdbId, mediaType) {
   try {
     const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
     const response = await fetch(url, {
-      headers: { "User-Agent": USER_AGENT, "Accept": "application/json" }
+      headers: { "User-Agent": getUserAgent(), "Accept": "application/json" }
     });
     if (!response.ok) return null;
     const data = await response.json();
@@ -46,14 +68,10 @@ async function convertImdbToTmdb(imdbId, mediaType) {
   }
 }
 
-// ==============================================
-// FUNÇÃO: Detecta a MELHOR qualidade do .m3u8
-// Retorna apenas a melhor (não extrai todos)
-// ==============================================
 async function detectBestQuality(m3u8Url) {
   try {
     const resp = await fetch(m3u8Url, {
-      headers: { "User-Agent": USER_AGENT }
+      headers: { "User-Agent": getUserAgent() }
     });
     if (!resp.ok) return { label: "720p", value: 720 };
     
@@ -66,17 +84,13 @@ async function detectBestQuality(m3u8Url) {
       const resolutionMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
       if (resolutionMatch) {
         const height = parseInt(resolutionMatch[2]);
-        if (height > bestHeight) {
-          bestHeight = height;
-        }
+        if (height > bestHeight) bestHeight = height;
       }
     }
     
-    // Classifica a melhor qualidade encontrada
     if (bestHeight >= 1080) return { label: "1080p", value: 1080 };
     if (bestHeight >= 720) return { label: "720p", value: 720 };
     if (bestHeight >= 480) return { label: "480p", value: 480 };
-    
     return { label: "720p", value: 720 };
   } catch (err) {
     return { label: "720p", value: 720 };
@@ -125,7 +139,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     }
     
     // ==============================================
-    // WatchPlayer (qualidade fixa 720p)
+    // Stream 1 (WatchPlayer)
     // ==============================================
     const watchPlayer = players.find(p => p.name === "WatchPlayer");
     if (watchPlayer) {
@@ -158,7 +172,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                   headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
                     "X-Requested-With": "XMLHttpRequest",
-                    "User-Agent": USER_AGENT,
+                    "User-Agent": getUserAgent(),
                     "Referer": watchUrl,
                     "Origin": "https://watchplayer.xyz"
                   },
@@ -180,7 +194,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                 headers: {
                   "Content-Type": "application/x-www-form-urlencoded",
                   "X-Requested-With": "XMLHttpRequest",
-                  "User-Agent": USER_AGENT,
+                  "User-Agent": getUserAgent(),
                   "Referer": watchUrl,
                   "Origin": "https://watchplayer.xyz"
                 },
@@ -199,7 +213,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         
         if (watchUrl.includes('.m3u8') || watchUrl.includes('/hls/')) {
           streams.push({
-            name: "WatchPlayer",
+            name: "Stream 1",
             title: "720p",
             url: watchUrl,
             quality: 720,
@@ -210,7 +224,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     }
     
     // ==============================================
-    // VIP Player (com detecção de qualidade)
+    // Stream 2 (VIP Player)
     // ==============================================
     const vipPlayer = players.find(p => p.name === "VIP Player");
     if (vipPlayer) {
@@ -229,11 +243,10 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             const vipData = await vipResp.json();
             
             if (vipData.securedLink) {
-              // Detecta a melhor qualidade disponível
               const quality = await detectBestQuality(vipData.securedLink);
               
               streams.push({
-                name: "VIP Player",
+                name: "Stream 2",
                 title: quality.label,
                 url: vipData.securedLink,
                 quality: quality.value,
