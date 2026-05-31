@@ -1,7 +1,7 @@
 /**
  * Pomfy - Provider com Byse/9n8o
  * Versão Final: 100% Manual (Sem Buffer/Crypto)
- * CORREÇÃO: Accept-Encoding: identity para evitar compressão gzip/br
+ * SEM HEADERS PERSONALIZADOS - Deixa o Nuvio gerenciar
  */
 
 var __async = (__this, __arguments, generator) => {
@@ -366,7 +366,7 @@ async function convertImdbToTmdb(imdbId, mediaType) {
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL getStreams
+// FUNÇÃO PRINCIPAL getStreams (SEM HEADERS PERSONALIZADOS)
 // ==============================================
 
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -548,30 +548,18 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     if (decryptResult.success) {
       addDebug(`✅ SUCESSO! URL OBTIDA`, decryptResult.url.substring(0, 100) + '...');
       
-      // HEADERS CORRIGIDOS - COM Accept-Encoding: identity
-      // Isso impede o servidor de comprimir a resposta com gzip/br
-      const finalHeaders = {
-        "User-Agent": USER_AGENT,
-        "Accept-Encoding": "identity",  // ← ESSE É O SEGREDO!
-        "Accept": "*/*",
-        "Origin": "https://pomfy-cdn.shop",
-        "Referer": "https://pomfy-cdn.shop/",
-        "X-Embed-Origin": "api.pomfy.stream",
-        "X-Embed-Referer": "https://api.pomfy.stream/",
-        "Connection": "keep-alive"
-      };
-      
       // Remove todos os streams de debug
       streams.length = 0;
       
-      // Adiciona o stream real com type hls e headers corrigidos
+      // SEM HEADERS PERSONALIZADOS - Igual ao código do amigo
+      // Deixa o Nuvio gerenciar os headers automaticamente
       streams.push({
         name: "Pomfy",
         title: "1080p",
         url: decryptResult.url,
         quality: 1080,
-        type: "hls",
-        headers: finalHeaders
+        type: "hls"
+        // SEM HEADERS!
       });
       
       return streams;
