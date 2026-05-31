@@ -1,94 +1,116 @@
 /**
- * Doramogo Provider - Com conversão IMDb → TMDB e headers completos
+ * Doramogo Provider - Com debugs detalhados em streams
+ * Para identificar onde está falhando no Nuvio
  */
 
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-// HEADERS COMPLETOS (iguais ao Kotlin)
+// HEADERS reduzidos (remove headers problemáticos para o Nuvio)
 const HEADERS = {
-    "accept": "*/*",
-    "accept-language": "pt-BR",
-    "origin": "https://www.doramogo.net",
-    "priority": "u=1, i",
-    "referer": "https://www.doramogo.net/",
-    "sec-ch-ua": "\"Chromium\";v=\"127\", \"Not)A;Brand\";v=\"99\", \"Microsoft Edge Simulate\";v=\"127\", \"Lemur\";v=\"127\"",
-    "sec-ch-ua-mobile": "?1",
-    "sec-ch-ua-platform": "\"Android\"",
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "cross-site",
-    "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "pt-BR,pt;q=0.9",
+    "Referer": "https://www.doramogo.net/",
+    "Origin": "https://www.doramogo.net"
 };
 
-// URL de um dorama que SEMPRE existe (para extrair proxies)
 const PROXY_SOURCE_URL = "https://www.doramogo.net/series/dream-stage-2026-legendado/temporada-1/episodio-1";
 
 let cachedProxies = null;
 let proxyExpiry = 0;
-const PROXY_CACHE_TIME = 60 * 60 * 1000; // 1 hora
+const PROXY_CACHE_TIME = 60 * 60 * 1000;
 
 // ==============================================
-// 1. CONVERTER IMDb → TMDB
+// DEBUG
 // ==============================================
-async function convertImdbToTmdb(imdbId, mediaType) {
+function addDebug(streams, title, content) {
+    streams.push({
+        name: "Doramogo [DEBUG]",
+        title: title,
+        url: typeof content === 'object' ? JSON.stringify(content) : String(content),
+        quality: 0,
+        headers: {}
+    });
+}
+
+// ==============================================
+// CONVERTER IMDb → TMDB
+// ==============================================
+async function convertImdbToTmdb(imdbId, mediaType, streams) {
+    addDebug(streams, "🔄 CONVERTENDO IMDb", `${imdbId} → TMDB`);
+    
     try {
         const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
         const response = await fetch(url, {
-            headers: { "User-Agent": HEADERS["user-agent"], "Accept": "application/json" }
+            headers: { "User-Agent": HEADERS["User-Agent"], "Accept": "application/json" }
         });
         
-        if (!response.ok) return null;
+        if (!response.ok) {
+            addDebug(streams, "❌ CONVERSÃO FALHOU", `HTTP ${response.status}`);
+            return null;
+        }
         
         const data = await response.json();
         
         if (mediaType === "movie") {
             if (data.movie_results && data.movie_results.length > 0) {
-                return data.movie_results[0].id;
+                const tmdbId = data.movie_results[0].id;
+                addDebug(streams, "✅ CONVERTIDO (FILME)", tmdbId);
+                return tmdbId;
             }
         } else {
             if (data.tv_results && data.tv_results.length > 0) {
-                return data.tv_results[0].id;
+                const tmdbId = data.tv_results[0].id;
+                addDebug(streams, "✅ CONVERTIDO (SÉRIE)", tmdbId);
+                return tmdbId;
             }
         }
         
+        addDebug(streams, "❌ NENHUM RESULTADO", "IMDb não encontrado");
         return null;
     } catch (err) {
-        console.log(`[Doramogo] ❌ Erro conversão IMDb: ${err.message}`);
+        addDebug(streams, "❌ ERRO CONVERSÃO", err.message);
         return null;
     }
 }
 
 // ==============================================
-// 2. EXTRAIR PROXYS
+// EXTRAIR PROXYS
 // ==============================================
-async function fetchProxies() {
+async function fetchProxies(streams) {
     if (cachedProxies && Date.now() < proxyExpiry) {
-        console.log(`[Doramogo] 💾 Usando proxies em cache`);
+        addDebug(streams, "💾 USANDO CACHE", `Primary: ${cachedProxies.primary}`);
         return cachedProxies;
     }
     
-    console.log(`[Doramogo] 🔍 Buscando proxies...`);
+    addDebug(streams, "🔍 BUSCANDO PROXYS", PROXY_SOURCE_URL);
     
     try {
         const response = await fetch(PROXY_SOURCE_URL, { headers: HEADERS });
+        
+        addDebug(streams, "📡 RESPOSTA PROXY", `Status: ${response.status}`);
+        
         if (!response.ok) {
-            console.log(`[Doramogo] ❌ Falha: ${response.status}`);
+            addDebug(streams, "❌ FALHA PROXY", `HTTP ${response.status}`);
             return null;
         }
         
         const html = await response.text();
+        addDebug(streams, "📄 HTML PROXY", `${html.length} bytes`);
         
         const primaryMatch = html.match(/const\s+PRIMARY_URL\s*=\s*['"]([^'"]+)['"]/);
         const fallbackMatch = html.match(/const\s+FALLBACK_URL\s*=\s*['"]([^'"]+)['"]/);
+        
+        addDebug(streams, "🔍 PRIMARY_MATCH", primaryMatch ? primaryMatch[1] : "não encontrado");
+        addDebug(streams, "🔍 FALLBACK_MATCH", fallbackMatch ? fallbackMatch[1] : "não encontrado");
         
         const proxies = {
             primary: primaryMatch ? primaryMatch[1] : "https://ondemand.netflxx.shop",
             fallback: fallbackMatch ? fallbackMatch[1] : "https://forks-doramas.netflxx.shop"
         };
         
-        console.log(`[Doramogo] ✅ PRIMARY: ${proxies.primary}`);
-        console.log(`[Doramogo] ✅ FALLBACK: ${proxies.fallback}`);
+        addDebug(streams, "✅ PROXYS FINAIS", `Primary: ${proxies.primary}\nFallback: ${proxies.fallback}`);
         
         cachedProxies = proxies;
         proxyExpiry = Date.now() + PROXY_CACHE_TIME;
@@ -96,41 +118,48 @@ async function fetchProxies() {
         return proxies;
         
     } catch (err) {
-        console.log(`[Doramogo] ❌ Erro: ${err.message}`);
+        addDebug(streams, "❌ ERRO FETCH PROXY", err.message);
         return null;
     }
 }
 
 // ==============================================
-// 3. TESTAR URL
+// TESTAR URL
 // ==============================================
-async function testStreamUrl(url) {
+async function testStreamUrl(url, streams) {
+    addDebug(streams, "📡 TESTANDO URL", url.substring(0, 100) + "...");
+    
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-        
         const response = await fetch(url, {
             method: 'GET',
-            headers: HEADERS,
-            signal: controller.signal
+            headers: HEADERS
         });
         
-        clearTimeout(timeoutId);
+        addDebug(streams, "📡 RESPOSTA", `Status: ${response.status}`);
+        
         return response.ok || response.status === 206;
     } catch (err) {
+        addDebug(streams, "❌ ERRO FETCH", err.message);
         return false;
     }
 }
 
 // ==============================================
-// 4. EXTRAIR QUALIDADES
+// EXTRAIR QUALIDADES
 // ==============================================
-async function extractQualitiesFromM3u8(url) {
+async function extractQualitiesFromM3u8(url, streams) {
+    addDebug(streams, "🎯 EXTRAINDO QUALIDADES", url.substring(0, 80) + "...");
+    
     try {
         const response = await fetch(url, { headers: HEADERS });
-        if (!response.ok) return [];
+        if (!response.ok) {
+            addDebug(streams, "❌ M3U8 FALHOU", `Status: ${response.status}`);
+            return [];
+        }
         
         const content = await response.text();
+        addDebug(streams, "📄 M3U8 CONTEÚDO", `${content.length} bytes`);
+        
         const qualities = [];
         const lines = content.split('\n');
         
@@ -149,18 +178,21 @@ async function extractQualitiesFromM3u8(url) {
                 
                 if (streamUrl && streamUrl.startsWith('http')) {
                     qualities.push({ url: streamUrl, height });
+                    addDebug(streams, "🎯 QUALIDADE", `${height}p`);
                 }
             }
         }
         
+        addDebug(streams, "✅ TOTAL QUALIDADES", qualities.length);
         return qualities;
-    } catch {
+    } catch (err) {
+        addDebug(streams, "❌ ERRO M3U8", err.message);
         return [];
     }
 }
 
 // ==============================================
-// 5. FUNÇÕES AUXILIARES
+// FUNÇÕES AUXILIARES
 // ==============================================
 function titleToSlug(title) {
     if (!title) return '';
@@ -170,10 +202,12 @@ function titleToSlug(title) {
         .replace(/^-|-$/g, '');
 }
 
-function generateSlugVariations(baseTitle, season, ano) {
+function generateSlugVariations(baseTitle, season, ano, streams) {
     const baseSlug = titleToSlug(baseTitle);
     const variations = [];
     const seen = {};
+
+    addDebug(streams, "🔨 SLUG BASE", baseSlug);
 
     function add(slug) {
         if (!seen[slug]) {
@@ -195,36 +229,43 @@ function generateSlugVariations(baseTitle, season, ano) {
         if (ano) add(baseSlug + '-' + ano + '-' + season);
     }
 
+    addDebug(streams, "✅ SLUGS GERADOS", variations.join(", "));
     return variations;
 }
 
-async function getTMDBTitle(tmdbId, mediaType) {
+async function getTMDBTitle(tmdbId, mediaType, streams) {
+    addDebug(streams, "📡 BUSCANDO TÍTULO TMDB", `ID: ${tmdbId}`);
+    
     try {
         const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
         const url = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
         
         const response = await fetch(url);
-        if (!response.ok) return null;
+        if (!response.ok) {
+            addDebug(streams, "❌ TMDB FALHOU", `Status: ${response.status}`);
+            return null;
+        }
         
         const data = await response.json();
         const title = mediaType === 'tv' ? data.name : data.title;
         const ano = (mediaType === 'tv' ? data.first_air_date : data.release_date)?.substring(0, 4);
         
-        console.log(`[Doramogo] ✅ Título: ${title}`);
+        addDebug(streams, "✅ TÍTULO ENCONTRADO", `${title} (${ano || 'sem ano'})`);
         
         return { title, ano };
     } catch (err) {
+        addDebug(streams, "❌ ERRO TMDB", err.message);
         return null;
     }
 }
 
 // ==============================================
-// 6. FUNÇÃO PRINCIPAL
+// FUNÇÃO PRINCIPAL
 // ==============================================
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     const streams = [];
     
-    console.log(`\n[Doramogo] 🎬 INICIANDO`);
+    addDebug(streams, "🎬 INICIANDO DORAMOGO", `ID: ${tmdbId} | Tipo: ${mediaType} | S${season}E${episode}`);
     
     // ==============================================
     // CONVERTE IMDb → TMDB se necessário
@@ -233,36 +274,45 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
     
     if (isImdb) {
-        console.log(`[Doramogo] 🔄 Convertendo IMDb: ${tmdbId}`);
-        const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
+        const convertedId = await convertImdbToTmdb(tmdbId, mediaType, streams);
         if (convertedId) {
             finalId = convertedId;
-            console.log(`[Doramogo] ✅ Convertido para TMDB: ${finalId}`);
         } else {
-            console.log(`[Doramogo] ❌ Falha na conversão IMDb`);
-            return [];
+            addDebug(streams, "❌ FALHA CONVERSÃO", "Retornando sem streams");
+            return streams;
         }
     }
     
-    console.log(`[Doramogo] 📺 TMDB ID: ${finalId} | Tipo: ${mediaType} | S${season}E${episode}`);
+    addDebug(streams, "📺 ID FINAL", `${finalId}`);
     
     try {
-        const proxies = await fetchProxies();
-        if (!proxies) return [];
+        // 1. Busca proxies
+        const proxies = await fetchProxies(streams);
+        if (!proxies) {
+            addDebug(streams, "❌ SEM PROXYS", "Retornando sem streams");
+            return streams;
+        }
         
-        const info = await getTMDBTitle(finalId, mediaType);
-        if (!info) return [];
+        // 2. Busca título TMDB
+        const info = await getTMDBTitle(finalId, mediaType, streams);
+        if (!info) {
+            addDebug(streams, "❌ SEM TÍTULO", "Retornando sem streams");
+            return streams;
+        }
         
+        // 3. Gera slugs
         const targetSeason = mediaType === 'movie' ? 1 : season;
         const targetEpisode = mediaType === 'movie' ? 1 : episode;
         const epPadded = targetEpisode.toString().padStart(2, '0');
         const seasonPadded = targetSeason.toString().padStart(2, '0');
         const timestamp = Date.now();
         
-        const slugVariations = generateSlugVariations(info.title, targetSeason, info.ano);
-        console.log(`[Doramogo] 🔨 ${slugVariations.length} slugs gerados`);
+        const slugVariations = generateSlugVariations(info.title, targetSeason, info.ano, streams);
+        addDebug(streams, "🔨 TOTAL SLUGS", slugVariations.length);
         
-        for (const slug of slugVariations) {
+        // 4. Testa cada slug
+        for (let i = 0; i < slugVariations.length; i++) {
+            const slug = slugVariations[i];
             const firstLetter = slug.charAt(0).toUpperCase() || 'T';
             const streamPath = `${firstLetter}/${slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
             
@@ -271,13 +321,18 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                 `${proxies.fallback}/${streamPath}`
             ];
             
-            for (const url of urlsToTry) {
-                console.log(`[Doramogo] 📡 Testando...`);
+            for (let j = 0; j < urlsToTry.length; j++) {
+                const url = urlsToTry[j];
+                const proxyName = j === 0 ? "PRIMARY" : "FALLBACK";
                 
-                if (await testStreamUrl(url)) {
-                    console.log(`[Doramogo] ✅ Funcionou! Slug: ${slug}`);
+                addDebug(streams, `📡 TESTANDO [${i+1}/${slugVariations.length}] ${proxyName}`, slug);
+                
+                const isValid = await testStreamUrl(url, streams);
+                
+                if (isValid) {
+                    addDebug(streams, "✅ URL FUNCIONOU", url.substring(0, 100) + "...");
                     
-                    const qualities = await extractQualitiesFromM3u8(url);
+                    const qualities = await extractQualitiesFromM3u8(url, streams);
                     
                     if (qualities.length > 0) {
                         for (const q of qualities) {
@@ -287,7 +342,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                                 url: q.url,
                                 quality: q.height,
                                 type: "hls",
-                                headers: HEADERS  // HEADERS no stream!
+                                headers: HEADERS
                             });
                         }
                     } else {
@@ -297,20 +352,22 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                             url: url,
                             quality: 720,
                             type: "hls",
-                            headers: HEADERS  // HEADERS no stream!
+                            headers: HEADERS
                         });
                     }
+                    
+                    addDebug(streams, "🎉 STREAMS ADICIONADOS", streams.length);
                     return streams;
                 }
             }
         }
         
-        console.log(`[Doramogo] ❌ Nenhum stream encontrado`);
+        addDebug(streams, "❌ NENHUM STREAM ENCONTRADO", "Todos os slugs falharam");
         return streams;
         
     } catch (err) {
-        console.log(`[Doramogo] ❌ Erro: ${err.message}`);
-        return [];
+        addDebug(streams, "❌ ERRO CRÍTICO", err.message);
+        return streams;
     }
 }
 
