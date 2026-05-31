@@ -1,44 +1,26 @@
 /**
- * PlayerFlix Provider - Completo para Filmes e Séries
- * Integra WatchPlayer e VIP Player
+ * PlayerFlix Provider - WatchPlayer + VIP Player
+ * Com extração real do .m3u8 do WatchPlayer
  */
 
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
   const streams = [];
-  const debug = [];
-
-  const addDebug = (title, content) => {
-    debug.push({ title, content: typeof content === 'object' ? JSON.stringify(content, null, 2) : String(content) });
-    streams.push({
-      name: "PlayerFlix [DEBUG]",
-      title: title,
-      url: typeof content === 'object' ? JSON.stringify(content) : String(content),
-      quality: 0,
-      headers: {}
-    });
-  };
-
-  addDebug("🔍 INICIANDO BUSCA", `ID: ${tmdbId} | Tipo: ${mediaType} | S${season}E${episode}`);
 
   try {
     // ==============================================
-    // 1. Monta URL correta baseada no tipo
+    // 1. Busca a lista de players do playerflix
     // ==============================================
     let ajaxUrl;
     let refererUrl;
     
     if (mediaType === "movie") {
-      // Para FILMES: type=movie (sem season/episode)
       ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${tmdbId}&type=movie`;
       refererUrl = `https://playerflix.ink/filme/${tmdbId}`;
-      addDebug("📡 [1/4] TIPO FILME", `URL: ${ajaxUrl}`);
     } else {
-      // Para SÉRIES: type=tv com season e episode
       const s = season || 1;
       const e = episode || 1;
       ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${tmdbId}&type=tv&season=${s}&episode=${e}`;
       refererUrl = `https://playerflix.ink/serie/${tmdbId}/${s}/${e}`;
-      addDebug("📡 [1/4] TIPO SÉRIE", `URL: ${ajaxUrl}`);
     }
     
     const response = await fetch(ajaxUrl, {
@@ -51,25 +33,17 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
       }
     });
 
-    if (!response.ok) {
-      addDebug("❌ [1/4] FALHA HTTP", `Status: ${response.status}`);
-      return streams;
-    }
-
+    if (!response.ok) return [];
+    
     const html = await response.text();
-    addDebug("✅ [1/4] HTML RECEBIDO", `${html.length} bytes`);
-
+    
     // ==============================================
-    // 2. Extrai todos os players com data-embed
+    // 2. Extrai WatchPlayer e VIP Player
     // ==============================================
     const players = [];
-    
-    // Padrão universal para player-option
     const playerRegex = /<div class="player-option"[^>]*data-embed="([^"]+)"[^>]*>[\s\S]*?<div class="player-name">([^<]+)<\/div>/g;
     
     let match;
-    addDebug("🔎 [2/4] EXTRAINDO PLAYERS", "Procurando players no HTML...");
-    
     while ((match = playerRegex.exec(html)) !== null) {
       const embedBase64 = match[1];
       const playerName = match[2].trim();
@@ -77,75 +51,125 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
       let embedUrl = "";
       try {
         embedUrl = atob(embedBase64);
-        addDebug(`📦 PLAYER ENCONTRADO`, `${playerName} | URL: ${embedUrl.substring(0, 80)}...`);
       } catch (e) {
-        addDebug(`⚠️ ERRO DECODIFICANDO`, `${playerName}: ${e.message}`);
         continue;
       }
       
-      players.push({
-        name: playerName,
-        embedUrl: embedUrl
+      players.push({ name: playerName, embedUrl });
+    }
+    
+    // ==============================================
+    // 3. Processa WatchPlayer (extrai .m3u8 real)
+    // ==============================================
+    const watchPlayer = players.find(p => p.name === "WatchPlayer");
+    if (watchPlayer) {
+      let watchUrl = watchPlayer.embedUrl;
+      
+      // Se for página HTML (watchplayer.xyz), extrai o .m3u8
+      if (watchUrl.includes("watchplayer.xyz")) {
+        try {
+          // Busca o HTML do watchplayer
+          const watchHtmlResp = await fetch(watchUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Referer": "https://playerflix.ink/",
+              "Origin": "https://watchplayer.xyz"
+            }
+          });
+          
+          if (watchHtmlResp.ok) {
+            const watchHtml = await watchHtmlResp.text();
+            let videoId = null;
+            
+            if (mediaType === "movie") {
+              // Filme: extrai data-id
+              const dataIdMatch = watchHtml.match(/data-id="(\d+)"/);
+              if (dataIdMatch) videoId = dataIdMatch[1];
+            } else {
+              // Série: extrai content_id
+              const s = season || 1;
+              const e = episode || 1;
+              const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
+              const contentMatch = watchHtml.match(pattern);
+              
+              if (contentMatch) {
+                const contentId = contentMatch[1];
+                
+                // Busca options
+                const optsResp = await fetch("https://watchplayer.xyz/api", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "User-Agent": "Mozilla/5.0",
+                    "Referer": watchUrl,
+                    "Origin": "https://watchplayer.xyz"
+                  },
+                  body: `action=getOptions&contentid=${contentId}`
+                });
+                
+                if (optsResp.ok) {
+                  const optsData = await optsResp.json();
+                  if (optsData.data?.options?.length) {
+                    videoId = optsData.data.options[0].ID;
+                  }
+                }
+              }
+            }
+            
+            if (videoId) {
+              // Busca o .m3u8 final
+              const playerResp = await fetch("https://watchplayer.xyz/api", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                  "X-Requested-With": "XMLHttpRequest",
+                  "User-Agent": "Mozilla/5.0",
+                  "Referer": watchUrl,
+                  "Origin": "https://watchplayer.xyz"
+                },
+                body: `action=getPlayer&video_id=${videoId}`
+              });
+              
+              if (playerResp.ok) {
+                const playerData = await playerResp.json();
+                if (playerData.data?.video_url) {
+                  watchUrl = playerData.data.video_url;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          // Fallback: mantém a URL original
+        }
+      }
+      
+      streams.push({
+        name: "WatchPlayer",
+        title: "720p",
+        url: watchUrl,
+        quality: 720,
+        type: "hls",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept-Encoding": "identity",
+          "Referer": "https://watchplayer.xyz/",
+          "Origin": "https://watchplayer.xyz"
+        }
       });
     }
     
-    addDebug("✅ [2/4] TOTAL PLAYERS", `${players.length} players encontrados`);
-
-    if (players.length === 0) {
-      addDebug("❌ NENHUM PLAYER ENCONTRADO", "Verifique se o HTML contém a classe 'player-option'");
-      addDebug("📄 HTML SAMPLE", html.substring(0, 1000));
-      return streams;
-    }
-
     // ==============================================
-    // 3. Processa cada player
+    // 4. Processa VIP Player (já dá .m3u8 direto)
     // ==============================================
-    addDebug("🎬 [3/4] PROCESSANDO PLAYERS", `Total: ${players.length}`);
-    
-    for (let i = 0; i < players.length; i++) {
-      const player = players[i];
-      addDebug(`🔄 PLAYER ${i+1}/${players.length}`, player.name);
-      
-      // ===== WatchPlayer =====
-      if (player.name === "WatchPlayer") {
-        addDebug(`🎥 WATCHPLAYER`, `URL: ${player.embedUrl}`);
-        
-        streams.push({
-          name: "WatchPlayer",
-          title: "720p",
-          url: player.embedUrl,
-          quality: 720,
-          type: "hls",
-          headers: {
-            "User-Agent": "Mozilla/5.0",
-            "Accept-Encoding": "identity",
-            "Referer": "https://watchplayer.xyz/",
-            "Origin": "https://watchplayer.xyz"
-          }
-        });
-        addDebug(`✅ WATCHPLAYER ADICIONADO`, `Stream 720p`);
-      }
-      
-      // ===== VIP Player =====
-      if (player.name === "VIP Player") {
-        addDebug(`🎥 VIP PLAYER`, `Embed URL: ${player.embedUrl}`);
-        
-        // Extrai o hash da URL
-        const hashMatch = player.embedUrl.match(/\/video\/([a-f0-9]+)/);
-        
-        if (!hashMatch) {
-          addDebug(`❌ VIP HASH`, `Não encontrado em: ${player.embedUrl}`);
-          continue;
-        }
-        
+    const vipPlayer = players.find(p => p.name === "VIP Player");
+    if (vipPlayer) {
+      const hashMatch = vipPlayer.embedUrl.match(/\/video\/([a-f0-9]+)/);
+      if (hashMatch) {
         const videoHash = hashMatch[1];
-        addDebug(`🔑 VIP HASH`, videoHash);
         
         try {
-          const apiUrl = `https://embedplayer2.xyz/player/index.php?data=${videoHash}&do=getVideo`;
-          addDebug(`📡 VIP API`, apiUrl);
-          
-          const vipResp = await fetch(apiUrl, {
+          const vipResp = await fetch(`https://embedplayer2.xyz/player/index.php?data=${videoHash}&do=getVideo`, {
             method: "POST",
             headers: {
               "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -157,83 +181,35 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             body: `hash=${videoHash}&r=`
           });
           
-          if (!vipResp.ok) {
-            addDebug(`❌ VIP API`, `HTTP ${vipResp.status}`);
-            continue;
-          }
-          
-          const vipData = await vipResp.json();
-          addDebug(`📦 VIP DATA`, vipData);
-          
-          if (vipData.securedLink) {
-            addDebug(`✅ VIP LINK`, vipData.securedLink);
-            streams.push({
-              name: "VIP Player",
-              title: "1080p",
-              url: vipData.securedLink,
-              quality: 1080,
-              type: "hls",
-              headers: {
-                "User-Agent": "Mozilla/5.0",
-                "Accept-Encoding": "identity",
-                "Referer": "https://embedplayer2.xyz/",
-                "Origin": "https://embedplayer2.xyz"
-              }
-            });
-            addDebug(`✅ VIP ADICIONADO`, `Stream 1080p`);
-          } else if (vipData.videoSource) {
-            addDebug(`⚠️ VIP SOURCE`, vipData.videoSource);
-            streams.push({
-              name: "VIP Player",
-              title: "720p",
-              url: vipData.videoSource,
-              quality: 720,
-              type: "hls",
-              headers: {
-                "User-Agent": "Mozilla/5.0",
-                "Accept-Encoding": "identity"
-              }
-            });
-          } else {
-            addDebug(`❌ VIP SEM LINK`, `Resposta sem securedLink ou videoSource`);
+          if (vipResp.ok) {
+            const vipData = await vipResp.json();
+            
+            if (vipData.securedLink) {
+              streams.push({
+                name: "VIP Player",
+                title: "1080p",
+                url: vipData.securedLink,
+                quality: 1080,
+                type: "hls",
+                headers: {
+                  "User-Agent": "Mozilla/5.0",
+                  "Accept-Encoding": "identity",
+                  "Referer": "https://embedplayer2.xyz/",
+                  "Origin": "https://embedplayer2.xyz"
+                }
+              });
+            }
           }
         } catch (err) {
-          addDebug(`❌ VIP ERRO`, err.message);
+          // Falha silenciosa
         }
       }
-      
-      // ===== Premium =====
-      if (player.name === "Premium") {
-        addDebug(`🎥 PREMIUM`, `URL: ${player.embedUrl}`);
-        streams.push({
-          name: "Premium",
-          title: "480p",
-          url: player.embedUrl,
-          quality: 480,
-          type: "iframe",
-          headers: {}
-        });
-        addDebug(`✅ PREMIUM ADICIONADO`, `Stream 480p (iframe)`);
-      }
-    }
-    
-    // ==============================================
-    // 4. RESULTADO FINAL
-    // ==============================================
-    const realStreams = streams.filter(s => s.name !== "PlayerFlix [DEBUG]");
-    addDebug("🎉 [4/4] FINALIZADO", `${realStreams.length} streams disponíveis`);
-    
-    if (realStreams.length === 0) {
-      addDebug("⚠️ NENHUM STREAM", "Tente novamente mais tarde");
-    } else {
-      addDebug("📋 STREAMS", realStreams.map(s => `${s.name} (${s.title})`).join(", "));
     }
     
     return streams;
     
   } catch (err) {
-    addDebug("❌ ERRO CRÍTICO", err.message);
-    return streams;
+    return [];
   }
 }
 
