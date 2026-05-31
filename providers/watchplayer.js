@@ -1,5 +1,6 @@
 /**
- * WatchPlayer Provider - Versão Corrigida para Filmes e Séries
+ * WatchPlayer Provider - Versão Final Corrigida
+ * Funciona para Filmes e Séries
  */
 
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -32,7 +33,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const htmlResp = await fetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) Chrome/127.0.0.0",
-        "Referer": "https://watchplayer.xyz/",
+        "Referer": "https://playerflix.ink/",
         "Accept": "text/html"
       }
     });
@@ -48,40 +49,52 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     let videoId = null;
 
     if (mediaType === "movie") {
-      // Para FILMES: extrai data-id do player_select_item
+      // FILMES: extrai data-id
       const movieMatch = html.match(/<div class="player_select_item" data-id="(\d+)">/);
       if (movieMatch) {
         videoId = movieMatch[1];
         addDebug(`✅ VIDEO_ID ENCONTRADO (FILME)`, videoId);
       }
     } else {
-      // Para SÉRIES: extrai content_id do episódio
+      // SÉRIES: extrai content_id (funciona com qualquer ordem dos atributos)
       const seasonNum = season || 1;
       const episodeNum = episode || 1;
-      const pattern = new RegExp(`data-season="${seasonNum}"[^>]*data-episode="${episodeNum}"[^>]*data-contentid="(\\d+)"`);
+      
+      // Padrão que funciona independente da ordem: data-contentid="X" data-season="Y" data-episode="Z"
+      const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${seasonNum}"[^>]*data-episode="${episodeNum}"`);
       const match = html.match(pattern);
       
-      if (match) {
-        const contentId = match[1];
-        addDebug(`✅ CONTENT_ID ENCONTRADO (SÉRIE)`, contentId);
-        
-        // Busca options para séries
-        const optsResp = await fetch("https://watchplayer.xyz/api", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-Requested-With": "XMLHttpRequest",
-            "User-Agent": "Mozilla/5.0"
-          },
-          body: `action=getOptions&contentid=${contentId}`
-        });
-        
-        const optsData = await optsResp.json();
-        if (optsData.data?.options?.length) {
-          videoId = optsData.data.options[0].ID;
-          addDebug(`✅ VIDEO_ID VIA OPTIONS`, videoId);
-        }
+      if (!match) {
+        addDebug(`❌ CONTENT_ID NÃO ENCONTRADO`, `T${seasonNum}E${episodeNum}`);
+        return streams;
       }
+      
+      const contentId = match[1];
+      addDebug(`✅ CONTENT_ID ENCONTRADO (SÉRIE)`, contentId);
+      
+      // Busca options via API
+      const optsResp = await fetch("https://watchplayer.xyz/api", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-Requested-With": "XMLHttpRequest",
+          "User-Agent": "Mozilla/5.0",
+          "Referer": url,
+          "Origin": "https://watchplayer.xyz"
+        },
+        body: `action=getOptions&contentid=${contentId}`
+      });
+      
+      const optsData = await optsResp.json();
+      addDebug(`📦 OPTIONS RESPONSE`, optsData);
+      
+      if (!optsData.data?.options?.length) {
+        addDebug(`❌ NENHUMA OPÇÃO DISPONÍVEL`, optsData);
+        return streams;
+      }
+      
+      videoId = optsData.data.options[0].ID;
+      addDebug(`✅ VIDEO_ID VIA OPTIONS`, videoId);
     }
 
     if (!videoId) {
@@ -105,6 +118,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     });
 
     const playerData = await playerResp.json();
+    addDebug(`📦 PLAYER RESPONSE`, playerData);
     
     if (!playerData.data?.video_url) {
       addDebug(`❌ URL NÃO ENCONTRADA`, playerData);
