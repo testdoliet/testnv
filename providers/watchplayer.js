@@ -1,7 +1,6 @@
 /**
  * PlayerFlix Provider - WatchPlayer + VIP Player
- * SEM extração de qualidades (retorna o master.m3u8 direto)
- * O Nuvio gerencia o Adaptive Bitrate automaticamente
+ * Com detecção de qualidade (sem extrair streams separados)
  */
 
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
@@ -47,6 +46,43 @@ async function convertImdbToTmdb(imdbId, mediaType) {
   }
 }
 
+// ==============================================
+// FUNÇÃO: Detecta a MELHOR qualidade do .m3u8
+// Retorna apenas a melhor (não extrai todos)
+// ==============================================
+async function detectBestQuality(m3u8Url) {
+  try {
+    const resp = await fetch(m3u8Url, {
+      headers: { "User-Agent": USER_AGENT }
+    });
+    if (!resp.ok) return { label: "720p", value: 720 };
+    
+    const content = await resp.text();
+    const lines = content.split('\n');
+    
+    let bestHeight = 0;
+    
+    for (const line of lines) {
+      const resolutionMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
+      if (resolutionMatch) {
+        const height = parseInt(resolutionMatch[2]);
+        if (height > bestHeight) {
+          bestHeight = height;
+        }
+      }
+    }
+    
+    // Classifica a melhor qualidade encontrada
+    if (bestHeight >= 1080) return { label: "1080p", value: 1080 };
+    if (bestHeight >= 720) return { label: "720p", value: 720 };
+    if (bestHeight >= 480) return { label: "480p", value: 480 };
+    
+    return { label: "720p", value: 720 };
+  } catch (err) {
+    return { label: "720p", value: 720 };
+  }
+}
+
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
   const streams = [];
 
@@ -89,7 +125,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     }
     
     // ==============================================
-    // WatchPlayer
+    // WatchPlayer (qualidade fixa 720p)
     // ==============================================
     const watchPlayer = players.find(p => p.name === "WatchPlayer");
     if (watchPlayer) {
@@ -174,8 +210,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     }
     
     // ==============================================
-    // VIP Player - Retorna o master.m3u8 direto
-    // SEM extrair qualidades (Nuvio faz ABR sozinho)
+    // VIP Player (com detecção de qualidade)
     // ==============================================
     const vipPlayer = players.find(p => p.name === "VIP Player");
     if (vipPlayer) {
@@ -194,13 +229,14 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             const vipData = await vipResp.json();
             
             if (vipData.securedLink) {
-              // Retorna o master.m3u8 direto
-              // Nuvio vai fazer Adaptive Bitrate automaticamente
+              // Detecta a melhor qualidade disponível
+              const quality = await detectBestQuality(vipData.securedLink);
+              
               streams.push({
                 name: "VIP Player",
-                title: "1080p",
+                title: quality.label,
                 url: vipData.securedLink,
-                quality: 1080,
+                quality: quality.value,
                 type: "hls"
               });
             }
