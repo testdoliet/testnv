@@ -1,76 +1,52 @@
 /**
- * WatchPlayer Provider - Versão Final Corrigida
- * Funciona para Filmes e Séries
+ * WatchPlayer Provider - Versão Estável
+ * Qualidade fixa: 720p
+ * Anti-detecção leve
  */
 
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
-  const streams = [];
-
-  const addDebug = (title, content) => {
-    streams.push({
-      name: "WatchPlayer [DEBUG]",
-      title: title,
-      url: typeof content === 'object' ? JSON.stringify(content) : String(content),
-      quality: 0,
-      headers: {}
-    });
-  };
-
-  addDebug(`🔍 INICIANDO BUSCA`, `${mediaType} ${tmdbId}`);
-
   try {
+    // Monta URL
     let url;
     if (mediaType === "movie") {
       url = `https://watchplayer.xyz/movie/${tmdbId}`;
-      addDebug(`📡 BUSCANDO FILME`, url);
     } else {
-      const seasonNum = season || 1;
-      const episodeNum = episode || 1;
-      url = `https://watchplayer.xyz/tvshow/${tmdbId}/${seasonNum}/${episodeNum}`;
-      addDebug(`📡 BUSCANDO SÉRIE`, `${url} (T${seasonNum}E${episodeNum})`);
+      const s = season || 1;
+      const e = episode || 1;
+      url = `https://watchplayer.xyz/tvshow/${tmdbId}/${s}/${e}`;
     }
 
-    const htmlResp = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) Chrome/127.0.0.0",
-        "Referer": "https://playerflix.ink/",
-        "Accept": "text/html"
-      }
-    });
+    // Headers simulando navegador real
+    const headers = {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language": "pt-BR,pt;q=0.9",
+      "Referer": "https://playerflix.ink/",
+      "Origin": "https://watchplayer.xyz"
+    };
 
-    if (!htmlResp.ok) {
-      addDebug(`❌ FALHA HTTP`, `Status: ${htmlResp.status}`);
-      return streams;
-    }
+    // Busca HTML
+    const htmlResp = await fetch(url, { headers });
+    if (!htmlResp.ok) return [];
 
     const html = await htmlResp.text();
-    addDebug(`📄 HTML`, `${html.length} bytes`);
-
     let videoId = null;
 
     if (mediaType === "movie") {
-      // FILMES: extrai data-id
-      const movieMatch = html.match(/<div class="player_select_item" data-id="(\d+)">/);
-      if (movieMatch) {
-        videoId = movieMatch[1];
-        addDebug(`✅ VIDEO_ID ENCONTRADO (FILME)`, videoId);
-      }
+      // Filmes: pega data-id
+      const match = html.match(/data-id="(\d+)"/);
+      if (match) videoId = match[1];
     } else {
-      // SÉRIES: extrai content_id (funciona com qualquer ordem dos atributos)
-      const seasonNum = season || 1;
-      const episodeNum = episode || 1;
+      // Séries: pega content-id do episódio
+      const s = season || 1;
+      const e = episode || 1;
       
-      // Padrão que funciona independente da ordem: data-contentid="X" data-season="Y" data-episode="Z"
-      const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${seasonNum}"[^>]*data-episode="${episodeNum}"`);
+      const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
       const match = html.match(pattern);
       
-      if (!match) {
-        addDebug(`❌ CONTENT_ID NÃO ENCONTRADO`, `T${seasonNum}E${episodeNum}`);
-        return streams;
-      }
+      if (!match) return [];
       
       const contentId = match[1];
-      addDebug(`✅ CONTENT_ID ENCONTRADO (SÉRIE)`, contentId);
       
       // Busca options via API
       const optsResp = await fetch("https://watchplayer.xyz/api", {
@@ -78,79 +54,67 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           "X-Requested-With": "XMLHttpRequest",
-          "User-Agent": "Mozilla/5.0",
+          "User-Agent": headers["User-Agent"],
           "Referer": url,
           "Origin": "https://watchplayer.xyz"
         },
         body: `action=getOptions&contentid=${contentId}`
       });
       
+      if (!optsResp.ok) return [];
+      
       const optsData = await optsResp.json();
-      addDebug(`📦 OPTIONS RESPONSE`, optsData);
       
-      if (!optsData.data?.options?.length) {
-        addDebug(`❌ NENHUMA OPÇÃO DISPONÍVEL`, optsData);
-        return streams;
+      if (optsData.data?.options?.length) {
+        videoId = optsData.data.options[0].ID;
       }
-      
-      videoId = optsData.data.options[0].ID;
-      addDebug(`✅ VIDEO_ID VIA OPTIONS`, videoId);
     }
 
-    if (!videoId) {
-      addDebug(`❌ VIDEO_ID NÃO ENCONTRADO`, `Tipo: ${mediaType}`);
-      return streams;
-    }
+    if (!videoId) return [];
 
-    // Busca a URL do player
-    addDebug(`📡 BUSCANDO PLAYER`, `video_id: ${videoId}`);
-    
+    // Busca URL do player
     const playerResp = await fetch("https://watchplayer.xyz/api", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "X-Requested-With": "XMLHttpRequest",
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": headers["User-Agent"],
         "Referer": url,
         "Origin": "https://watchplayer.xyz"
       },
       body: `action=getPlayer&video_id=${videoId}`
     });
-
-    const playerData = await playerResp.json();
-    addDebug(`📦 PLAYER RESPONSE`, playerData);
     
-    if (!playerData.data?.video_url) {
-      addDebug(`❌ URL NÃO ENCONTRADA`, playerData);
-      return streams;
-    }
-
+    if (!playerResp.ok) return [];
+    
+    const playerData = await playerResp.json();
+    
+    if (!playerData.data?.video_url) return [];
+    
     const videoUrl = playerData.data.video_url;
-    addDebug(`✅ URL OBTIDA`, videoUrl);
 
-    // Remove debug streams
-    streams.length = 0;
+    // Headers para o stream (sem compressão)
+    const streamHeaders = {
+      "User-Agent": headers["User-Agent"],
+      "Accept-Encoding": "identity",
+      "Accept": "*/*",
+      "Origin": "https://watchplayer.xyz",
+      "Referer": "https://watchplayer.xyz/",
+      "Connection": "keep-alive"
+    };
 
-    // Adiciona stream principal
-    streams.push({
+    // Retorna stream com qualidade 720p fixa
+    return [{
       name: "WatchPlayer",
-      title: "1080p",
+      title: "720p",
       url: videoUrl,
-      quality: 1080,
+      quality: 720,
       type: "hls",
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        "Accept-Encoding": "identity",
-        "Referer": "https://watchplayer.xyz/",
-        "Origin": "https://watchplayer.xyz"
-      }
-    });
+      headers: streamHeaders
+    }];
 
-    return streams;
-
-  } catch (e) {
-    addDebug(`❌ ERRO`, e.message);
-    return streams;
+  } catch (err) {
+    return [];
   }
 }
 
