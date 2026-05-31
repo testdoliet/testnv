@@ -1,12 +1,67 @@
 /**
  * PlayerFlix Provider - WatchPlayer + VIP Player
- * Com isolamento de erros (um não quebra o outro)
+ * Com conversão IMDb → TMDB
  */
 
+const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// ==============================================
+// FUNÇÃO: Converter IMDb para TMDB
+// ==============================================
+async function convertImdbToTmdb(imdbId, mediaType) {
+  try {
+    const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json"
+      }
+    });
+    
+    if (!response.ok) return null;
+    
+    const data = await response.json();
+    
+    if (mediaType === "movie") {
+      if (data.movie_results && data.movie_results.length > 0) {
+        return data.movie_results[0].id;
+      }
+    } else {
+      if (data.tv_results && data.tv_results.length > 0) {
+        return data.tv_results[0].id;
+      }
+    }
+    
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
+// ==============================================
+// FUNÇÃO PRINCIPAL
+// ==============================================
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
   const streams = [];
 
   try {
+    // ==============================================
+    // 0. Converte IMDb para TMDB se necessário
+    // ==============================================
+    let finalId = tmdbId;
+    const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
+    
+    if (isImdb) {
+      const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
+      if (convertedId) {
+        finalId = convertedId;
+      } else {
+        return []; // Falha na conversão
+      }
+    }
+    
     // ==============================================
     // 1. Busca a lista de players do playerflix
     // ==============================================
@@ -14,18 +69,18 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     let refererUrl;
     
     if (mediaType === "movie") {
-      ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${tmdbId}&type=movie`;
-      refererUrl = `https://playerflix.ink/filme/${tmdbId}`;
+      ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=movie`;
+      refererUrl = `https://playerflix.ink/filme/${finalId}`;
     } else {
       const s = season || 1;
       const e = episode || 1;
-      ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${tmdbId}&type=tv&season=${s}&episode=${e}`;
-      refererUrl = `https://playerflix.ink/serie/${tmdbId}/${s}/${e}`;
+      ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=tv&season=${s}&episode=${e}`;
+      refererUrl = `https://playerflix.ink/serie/${finalId}/${s}/${e}`;
     }
     
     const response = await fetch(ajaxUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": USER_AGENT,
         "Accept": "*/*",
         "Accept-Language": "pt-BR,pt;q=0.9",
         "Referer": refererUrl,
@@ -66,13 +121,11 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
       try {
         let watchUrl = watchPlayer.embedUrl;
         
-        // Se for página HTML (watchplayer.xyz), extrai o .m3u8
         if (watchUrl.includes("watchplayer.xyz")) {
           try {
-            // Busca o HTML do watchplayer
             const watchHtmlResp = await fetch(watchUrl, {
               headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": USER_AGENT,
                 "Referer": "https://playerflix.ink/",
                 "Origin": "https://watchplayer.xyz"
               }
@@ -83,11 +136,9 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
               let videoId = null;
               
               if (mediaType === "movie") {
-                // Filme: extrai data-id
                 const dataIdMatch = watchHtml.match(/data-id="(\d+)"/);
                 if (dataIdMatch) videoId = dataIdMatch[1];
               } else {
-                // Série: extrai content_id
                 const s = season || 1;
                 const e = episode || 1;
                 const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
@@ -96,13 +147,12 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                 if (contentMatch) {
                   const contentId = contentMatch[1];
                   
-                  // Busca options
                   const optsResp = await fetch("https://watchplayer.xyz/api", {
                     method: "POST",
                     headers: {
                       "Content-Type": "application/x-www-form-urlencoded",
                       "X-Requested-With": "XMLHttpRequest",
-                      "User-Agent": "Mozilla/5.0",
+                      "User-Agent": USER_AGENT,
                       "Referer": watchUrl,
                       "Origin": "https://watchplayer.xyz"
                     },
@@ -119,13 +169,12 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
               }
               
               if (videoId) {
-                // Busca o .m3u8 final
                 const playerResp = await fetch("https://watchplayer.xyz/api", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
                     "X-Requested-With": "XMLHttpRequest",
-                    "User-Agent": "Mozilla/5.0",
+                    "User-Agent": USER_AGENT,
                     "Referer": watchUrl,
                     "Origin": "https://watchplayer.xyz"
                   },
@@ -141,11 +190,10 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
               }
             }
           } catch (err) {
-            // Erro na extração, mantém URL original (página HTML)
+            // Erro na extração
           }
         }
         
-        // Só adiciona se a URL for .m3u8 (não página HTML)
         if (watchUrl.includes('.m3u8') || watchUrl.includes('/hls/')) {
           streams.push({
             name: "WatchPlayer",
@@ -154,7 +202,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             quality: 720,
             type: "hls",
             headers: {
-              "User-Agent": "Mozilla/5.0",
+              "User-Agent": USER_AGENT,
               "Accept-Encoding": "identity",
               "Referer": "https://watchplayer.xyz/",
               "Origin": "https://watchplayer.xyz"
@@ -162,8 +210,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
           });
         }
       } catch (err) {
-        // Erro no WatchPlayer não afeta os outros
-        console.error("WatchPlayer falhou:", err.message);
+        // WatchPlayer falhou
       }
     }
     
@@ -180,7 +227,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
           const vipResp = await fetch(`https://embedplayer2.xyz/player/index.php?data=${videoHash}&do=getVideo`, {
             method: "POST",
             headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "User-Agent": USER_AGENT,
               "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
               "X-Requested-With": "XMLHttpRequest",
               "Origin": "https://embedplayer2.xyz",
@@ -200,7 +247,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                 quality: 1080,
                 type: "hls",
                 headers: {
-                  "User-Agent": "Mozilla/5.0",
+                  "User-Agent": USER_AGENT,
                   "Accept-Encoding": "identity",
                   "Referer": "https://embedplayer2.xyz/",
                   "Origin": "https://embedplayer2.xyz"
@@ -210,8 +257,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
           }
         }
       } catch (err) {
-        // Erro no VIP Player não afeta os outros
-        console.error("VIP Player falhou:", err.message);
+        // VIP Player falhou
       }
     }
     
