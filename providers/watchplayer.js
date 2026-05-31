@@ -1,6 +1,6 @@
 /**
  * PlayerFlix Provider - WatchPlayer + VIP Player
- * Com conversão IMDb → TMDB
+ * Com múltiplas qualidades para VIP Player
  */
 
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
@@ -41,6 +41,76 @@ async function convertImdbToTmdb(imdbId, mediaType) {
 }
 
 // ==============================================
+// FUNÇÃO: Extrair todas as qualidades do .m3u8
+// ==============================================
+async function extractAllQualities(m3u8Url, headers) {
+  const qualities = [];
+  
+  try {
+    const resp = await fetch(m3u8Url, { headers });
+    if (!resp.ok) return qualities;
+    
+    const content = await resp.text();
+    const lines = content.split('\n');
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      // Procura por linha de stream: #EXT-X-STREAM-INF:RESOLUTION=1280x720,BANDWIDTH=2048000,NAME="720p"
+      if (line.includes('#EXT-X-STREAM-INF')) {
+        // Extrai resolução
+        const resolutionMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
+        // Extrai bandwidth
+        const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
+        // Extrai nome da qualidade (ex: NAME="720p")
+        const nameMatch = line.match(/NAME="([^"]+)"/);
+        
+        // Pega a URL da próxima linha
+        const urlLine = lines[i + 1]?.trim();
+        
+        if (resolutionMatch && urlLine && !urlLine.startsWith('#')) {
+          const width = parseInt(resolutionMatch[1]);
+          const height = parseInt(resolutionMatch[2]);
+          let name = nameMatch ? nameMatch[1] : `${height}p`;
+          const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1]) : 0;
+          
+          // Resolve URL relativa se necessário
+          let fullUrl = urlLine;
+          if (!urlLine.startsWith('http')) {
+            const baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
+            fullUrl = baseUrl + urlLine;
+          }
+          
+          // Classifica qualidade numericamente
+          let qualityValue = height;
+          if (height >= 2160) qualityValue = 2160;
+          else if (height >= 1080) qualityValue = 1080;
+          else if (height >= 720) qualityValue = 720;
+          else if (height >= 480) qualityValue = 480;
+          else qualityValue = height;
+          
+          qualities.push({
+            label: name,
+            height: height,
+            width: width,
+            bandwidth: bandwidth,
+            url: fullUrl,
+            quality: qualityValue
+          });
+        }
+      }
+    }
+    
+    // Ordena da pior para a melhor qualidade
+    qualities.sort((a, b) => a.height - b.height);
+    
+    return qualities;
+  } catch (err) {
+    return qualities;
+  }
+}
+
+// ==============================================
 // FUNÇÃO PRINCIPAL
 // ==============================================
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
@@ -58,7 +128,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
       if (convertedId) {
         finalId = convertedId;
       } else {
-        return []; // Falha na conversão
+        return [];
       }
     }
     
@@ -114,7 +184,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     }
     
     // ==============================================
-    // 3. Processa WatchPlayer (isolado)
+    // 3. Processa WatchPlayer (qualidade fixa 720p)
     // ==============================================
     const watchPlayer = players.find(p => p.name === "WatchPlayer");
     if (watchPlayer) {
@@ -215,7 +285,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     }
     
     // ==============================================
-    // 4. Processa VIP Player (isolado)
+    // 4. Processa VIP Player (múltiplas qualidades)
     // ==============================================
     const vipPlayer = players.find(p => p.name === "VIP Player");
     if (vipPlayer) {
@@ -240,19 +310,45 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             const vipData = await vipResp.json();
             
             if (vipData.securedLink) {
-              streams.push({
-                name: "VIP Player",
-                title: "1080p",
-                url: vipData.securedLink,
-                quality: 1080,
-                type: "hls",
-                headers: {
-                  "User-Agent": USER_AGENT,
-                  "Accept-Encoding": "identity",
-                  "Referer": "https://embedplayer2.xyz/",
-                  "Origin": "https://embedplayer2.xyz"
-                }
+              // Extrai todas as qualidades disponíveis
+              const qualities = await extractAllQualities(vipData.securedLink, {
+                "User-Agent": USER_AGENT,
+                "Accept-Encoding": "identity"
               });
+              
+              if (qualities.length > 0) {
+                // Adiciona um stream para cada qualidade
+                for (const q of qualities) {
+                  streams.push({
+                    name: "VIP Player",
+                    title: q.label,
+                    url: q.url,
+                    quality: q.quality,
+                    type: "hls",
+                    headers: {
+                      "User-Agent": USER_AGENT,
+                      "Accept-Encoding": "identity",
+                      "Referer": "https://embedplayer2.xyz/",
+                      "Origin": "https://embedplayer2.xyz"
+                    }
+                  });
+                }
+              } else {
+                // Fallback: nenhuma qualidade encontrada, usa o master.m3u8
+                streams.push({
+                  name: "VIP Player",
+                  title: "720p",
+                  url: vipData.securedLink,
+                  quality: 720,
+                  type: "hls",
+                  headers: {
+                    "User-Agent": USER_AGENT,
+                    "Accept-Encoding": "identity",
+                    "Referer": "https://embedplayer2.xyz/",
+                    "Origin": "https://embedplayer2.xyz"
+                  }
+                });
+              }
             }
           }
         }
