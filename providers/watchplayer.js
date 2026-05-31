@@ -1,12 +1,8 @@
 /**
  * WatchPlayer Provider - Versão Simplificada
- * Qualidade fixa: 720p (igual Pomfy, mas com label fixa)
- * Sem detecção complexa, apenas o essencial
+ * Qualidade fixa: 720p
+ * Sem cache para evitar problemas
  */
-
-// Cache em memória
-const cache = new Map();
-const CACHE_TTL = 5 * 60 * 1000;
 
 // ==============================================
 // BASE64 MANUAL (igual ao Pomfy)
@@ -137,15 +133,6 @@ const getStreamHeaders = () => {
 
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
   try {
-    // Cache check
-    const cacheKey = `${mediaType}:${tmdbId}:${season}:${episode}`;
-    if (cache.has(cacheKey)) {
-      const cached = cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < CACHE_TTL) {
-        return cached.data;
-      }
-    }
-
     await randomDelay(100, 300);
 
     // Monta URL
@@ -224,7 +211,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     const videoUrl = playerData.data.video_url;
 
     // Qualidade fixa: 720p
-    const result = [{
+    return [{
       name: "WatchPlayer",
       title: "720p",
       url: videoUrl,
@@ -232,14 +219,6 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       type: "hls",
       headers: getStreamHeaders()
     }];
-
-    // Salva cache
-    cache.set(cacheKey, {
-      data: result,
-      timestamp: Date.now()
-    });
-
-    return result;
 
   } catch (err) {
     return [];
