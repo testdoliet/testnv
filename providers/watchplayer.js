@@ -1,22 +1,14 @@
 /**
  * PlayerFlix Provider - WatchPlayer + VIP Player
- * Com anti-detecção e delays
+ * Com anti-detecção (sem delays)
  */
 
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
 // ==============================================
-// ANTI-DETECÇÃO
+// ANTI-DETECÇÃO (sem delays)
 // ==============================================
-
-// Delay aleatório (200-800ms)
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-const randomDelay = async () => {
-  const delay = Math.floor(Math.random() * 600) + 200;
-  await sleep(delay);
-};
 
 // User-Agent rotativo
 const getUserAgent = () => {
@@ -66,8 +58,6 @@ const getHeaders = (referer, isApi = false) => {
 // ==============================================
 async function convertImdbToTmdb(imdbId, mediaType) {
   try {
-    await randomDelay();
-    
     const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
     const response = await fetch(url, {
       headers: {
@@ -150,9 +140,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
   const streams = [];
 
   try {
-    // Delay inicial
-    await randomDelay();
-    
     // ==============================================
     // 0. Converte IMDb para TMDB se necessário
     // ==============================================
@@ -192,9 +179,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     
     const html = await response.text();
     
-    // Delay após primeira requisição
-    await randomDelay();
-    
     // ==============================================
     // 2. Extrai WatchPlayer e VIP Player
     // ==============================================
@@ -225,8 +209,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         let watchUrl = watchPlayer.embedUrl;
         
         if (watchUrl.includes("watchplayer.xyz")) {
-          await randomDelay();
-          
           const watchHtmlResp = await fetch(watchUrl, {
             headers: getHeaders("https://playerflix.ink/")
           });
@@ -246,8 +228,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
               
               if (contentMatch) {
                 const contentId = contentMatch[1];
-                
-                await randomDelay();
                 
                 const optsResp = await fetch("https://watchplayer.xyz/api", {
                   method: "POST",
@@ -271,8 +251,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             }
             
             if (videoId) {
-              await randomDelay();
-              
               const playerResp = await fetch("https://watchplayer.xyz/api", {
                 method: "POST",
                 headers: {
@@ -325,8 +303,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         if (hashMatch) {
           const videoHash = hashMatch[1];
           
-          await randomDelay();
-          
           const vipResp = await fetch(`https://embedplayer2.xyz/player/index.php?data=${videoHash}&do=getVideo`, {
             method: "POST",
             headers: getHeaders(`https://embedplayer2.xyz/video/${videoHash}`, true),
@@ -337,8 +313,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             const vipData = await vipResp.json();
             
             if (vipData.securedLink) {
-              await randomDelay();
-              
               const qualities = await extractAllQualities(vipData.securedLink, {
                 "User-Agent": getUserAgent(),
                 "Accept-Encoding": "identity"
