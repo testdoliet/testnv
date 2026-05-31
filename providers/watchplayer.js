@@ -1,15 +1,12 @@
 /**
  * PlayerFlix Provider - WatchPlayer + VIP Player
- * SEM HEADERS PERSONALIZADOS (igual ao Pomfy corrigido)
+ * SEM extração de qualidades (retorna o master.m3u8 direto)
+ * O Nuvio gerencia o Adaptive Bitrate automaticamente
  */
 
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-// ==============================================
-// HEADERS APENAS PARA REQUISIÇÕES (não para streams)
-// ==============================================
 
 const getHeaders = (referer, isApi = false) => {
   if (isApi) {
@@ -31,118 +28,39 @@ const getHeaders = (referer, isApi = false) => {
   };
 };
 
-// ==============================================
-// FUNÇÃO: Converter IMDb para TMDB
-// ==============================================
 async function convertImdbToTmdb(imdbId, mediaType) {
   try {
     const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
     const response = await fetch(url, {
-      headers: {
-        "User-Agent": USER_AGENT,
-        "Accept": "application/json"
-      }
+      headers: { "User-Agent": USER_AGENT, "Accept": "application/json" }
     });
-    
     if (!response.ok) return null;
-    
     const data = await response.json();
-    
     if (mediaType === "movie") {
-      if (data.movie_results && data.movie_results.length > 0) {
-        return data.movie_results[0].id;
-      }
+      if (data.movie_results && data.movie_results.length > 0) return data.movie_results[0].id;
     } else {
-      if (data.tv_results && data.tv_results.length > 0) {
-        return data.tv_results[0].id;
-      }
+      if (data.tv_results && data.tv_results.length > 0) return data.tv_results[0].id;
     }
-    
     return null;
   } catch (err) {
     return null;
   }
 }
 
-// ==============================================
-// FUNÇÃO: Extrair todas as qualidades do .m3u8
-// ==============================================
-async function extractAllQualities(m3u8Url) {
-  const qualities = [];
-  
-  try {
-    const resp = await fetch(m3u8Url, {
-      headers: {
-        "User-Agent": USER_AGENT
-      }
-    });
-    if (!resp.ok) return qualities;
-    
-    const content = await resp.text();
-    const lines = content.split('\n');
-    
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      if (line.includes('#EXT-X-STREAM-INF')) {
-        const resolutionMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
-        const nameMatch = line.match(/NAME="([^"]+)"/);
-        const urlLine = lines[i + 1]?.trim();
-        
-        if (resolutionMatch && urlLine && !urlLine.startsWith('#')) {
-          const height = parseInt(resolutionMatch[2]);
-          const name = nameMatch ? nameMatch[1] : `${height}p`;
-          
-          let fullUrl = urlLine;
-          if (!urlLine.startsWith('http')) {
-            const baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
-            fullUrl = baseUrl + urlLine;
-          }
-          
-          qualities.push({
-            label: name,
-            url: fullUrl,
-            quality: height
-          });
-        }
-      }
-    }
-    
-    qualities.sort((a, b) => a.quality - b.quality);
-    return qualities;
-  } catch (err) {
-    return qualities;
-  }
-}
-
-// ==============================================
-// FUNÇÃO PRINCIPAL (SEM HEADERS NOS STREAMS)
-// ==============================================
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
   const streams = [];
 
   try {
-    // ==============================================
-    // 0. Converte IMDb para TMDB se necessário
-    // ==============================================
     let finalId = tmdbId;
     const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
     
     if (isImdb) {
       const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
-      if (convertedId) {
-        finalId = convertedId;
-      } else {
-        return [];
-      }
+      if (convertedId) finalId = convertedId;
+      else return [];
     }
     
-    // ==============================================
-    // 1. Busca a lista de players do playerflix
-    // ==============================================
-    let ajaxUrl;
-    let refererUrl;
-    
+    let ajaxUrl, refererUrl;
     if (mediaType === "movie") {
       ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=movie`;
       refererUrl = `https://playerflix.ink/filme/${finalId}`;
@@ -153,17 +71,11 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
       refererUrl = `https://playerflix.ink/serie/${finalId}/${s}/${e}`;
     }
     
-    const response = await fetch(ajaxUrl, {
-      headers: getHeaders(refererUrl)
-    });
-
+    const response = await fetch(ajaxUrl, { headers: getHeaders(refererUrl) });
     if (!response.ok) return [];
     
     const html = await response.text();
     
-    // ==============================================
-    // 2. Extrai WatchPlayer e VIP Player
-    // ==============================================
     const players = [];
     const playerRegex = /<div class="player-option"[^>]*data-embed="([^"]+)"[^>]*>[\s\S]*?<div class="player-name">([^<]+)<\/div>/g;
     
@@ -171,19 +83,13 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     while ((match = playerRegex.exec(html)) !== null) {
       const embedBase64 = match[1];
       const playerName = match[2].trim();
-      
       let embedUrl = "";
-      try {
-        embedUrl = atob(embedBase64);
-      } catch (e) {
-        continue;
-      }
-      
+      try { embedUrl = atob(embedBase64); } catch (e) { continue; }
       players.push({ name: playerName, embedUrl });
     }
     
     // ==============================================
-    // 3. Processa WatchPlayer (SEM HEADERS)
+    // WatchPlayer
     // ==============================================
     const watchPlayer = players.find(p => p.name === "WatchPlayer");
     if (watchPlayer) {
@@ -256,7 +162,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         }
         
         if (watchUrl.includes('.m3u8') || watchUrl.includes('/hls/')) {
-          // SEM HEADERS - igual ao Pomfy corrigido
           streams.push({
             name: "WatchPlayer",
             title: "720p",
@@ -265,13 +170,12 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             type: "hls"
           });
         }
-      } catch (err) {
-        // WatchPlayer falhou
-      }
+      } catch (err) {}
     }
     
     // ==============================================
-    // 4. Processa VIP Player (SEM HEADERS)
+    // VIP Player - Retorna o master.m3u8 direto
+    // SEM extrair qualidades (Nuvio faz ABR sozinho)
     // ==============================================
     const vipPlayer = players.find(p => p.name === "VIP Player");
     if (vipPlayer) {
@@ -290,34 +194,19 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             const vipData = await vipResp.json();
             
             if (vipData.securedLink) {
-              const qualities = await extractAllQualities(vipData.securedLink);
-              
-              if (qualities.length > 0) {
-                // SEM HEADERS - igual ao Pomfy corrigido
-                for (const q of qualities) {
-                  streams.push({
-                    name: "VIP Player",
-                    title: q.label,
-                    url: q.url,
-                    quality: q.quality,
-                    type: "hls"
-                  });
-                }
-              } else {
-                streams.push({
-                  name: "VIP Player",
-                  title: "720p",
-                  url: vipData.securedLink,
-                  quality: 720,
-                  type: "hls"
-                });
-              }
+              // Retorna o master.m3u8 direto
+              // Nuvio vai fazer Adaptive Bitrate automaticamente
+              streams.push({
+                name: "VIP Player",
+                title: "1080p",
+                url: vipData.securedLink,
+                quality: 1080,
+                type: "hls"
+              });
             }
           }
         }
-      } catch (err) {
-        // VIP Player falhou
-      }
+      } catch (err) {}
     }
     
     return streams;
