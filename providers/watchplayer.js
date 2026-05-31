@@ -1,6 +1,6 @@
 /**
  * PlayerFlix Provider - WatchPlayer + VIP Player
- * Com extração real do .m3u8 do WatchPlayer
+ * Com isolamento de erros (um não quebra o outro)
  */
 
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
@@ -59,44 +59,68 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
     }
     
     // ==============================================
-    // 3. Processa WatchPlayer (extrai .m3u8 real)
+    // 3. Processa WatchPlayer (isolado)
     // ==============================================
     const watchPlayer = players.find(p => p.name === "WatchPlayer");
     if (watchPlayer) {
-      let watchUrl = watchPlayer.embedUrl;
-      
-      // Se for página HTML (watchplayer.xyz), extrai o .m3u8
-      if (watchUrl.includes("watchplayer.xyz")) {
-        try {
-          // Busca o HTML do watchplayer
-          const watchHtmlResp = await fetch(watchUrl, {
-            headers: {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-              "Referer": "https://playerflix.ink/",
-              "Origin": "https://watchplayer.xyz"
-            }
-          });
-          
-          if (watchHtmlResp.ok) {
-            const watchHtml = await watchHtmlResp.text();
-            let videoId = null;
+      try {
+        let watchUrl = watchPlayer.embedUrl;
+        
+        // Se for página HTML (watchplayer.xyz), extrai o .m3u8
+        if (watchUrl.includes("watchplayer.xyz")) {
+          try {
+            // Busca o HTML do watchplayer
+            const watchHtmlResp = await fetch(watchUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://playerflix.ink/",
+                "Origin": "https://watchplayer.xyz"
+              }
+            });
             
-            if (mediaType === "movie") {
-              // Filme: extrai data-id
-              const dataIdMatch = watchHtml.match(/data-id="(\d+)"/);
-              if (dataIdMatch) videoId = dataIdMatch[1];
-            } else {
-              // Série: extrai content_id
-              const s = season || 1;
-              const e = episode || 1;
-              const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
-              const contentMatch = watchHtml.match(pattern);
+            if (watchHtmlResp.ok) {
+              const watchHtml = await watchHtmlResp.text();
+              let videoId = null;
               
-              if (contentMatch) {
-                const contentId = contentMatch[1];
+              if (mediaType === "movie") {
+                // Filme: extrai data-id
+                const dataIdMatch = watchHtml.match(/data-id="(\d+)"/);
+                if (dataIdMatch) videoId = dataIdMatch[1];
+              } else {
+                // Série: extrai content_id
+                const s = season || 1;
+                const e = episode || 1;
+                const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
+                const contentMatch = watchHtml.match(pattern);
                 
-                // Busca options
-                const optsResp = await fetch("https://watchplayer.xyz/api", {
+                if (contentMatch) {
+                  const contentId = contentMatch[1];
+                  
+                  // Busca options
+                  const optsResp = await fetch("https://watchplayer.xyz/api", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/x-www-form-urlencoded",
+                      "X-Requested-With": "XMLHttpRequest",
+                      "User-Agent": "Mozilla/5.0",
+                      "Referer": watchUrl,
+                      "Origin": "https://watchplayer.xyz"
+                    },
+                    body: `action=getOptions&contentid=${contentId}`
+                  });
+                  
+                  if (optsResp.ok) {
+                    const optsData = await optsResp.json();
+                    if (optsData.data?.options?.length) {
+                      videoId = optsData.data.options[0].ID;
+                    }
+                  }
+                }
+              }
+              
+              if (videoId) {
+                // Busca o .m3u8 final
+                const playerResp = await fetch("https://watchplayer.xyz/api", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/x-www-form-urlencoded",
@@ -105,70 +129,54 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                     "Referer": watchUrl,
                     "Origin": "https://watchplayer.xyz"
                   },
-                  body: `action=getOptions&contentid=${contentId}`
+                  body: `action=getPlayer&video_id=${videoId}`
                 });
                 
-                if (optsResp.ok) {
-                  const optsData = await optsResp.json();
-                  if (optsData.data?.options?.length) {
-                    videoId = optsData.data.options[0].ID;
+                if (playerResp.ok) {
+                  const playerData = await playerResp.json();
+                  if (playerData.data?.video_url) {
+                    watchUrl = playerData.data.video_url;
                   }
                 }
               }
             }
-            
-            if (videoId) {
-              // Busca o .m3u8 final
-              const playerResp = await fetch("https://watchplayer.xyz/api", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
-                  "X-Requested-With": "XMLHttpRequest",
-                  "User-Agent": "Mozilla/5.0",
-                  "Referer": watchUrl,
-                  "Origin": "https://watchplayer.xyz"
-                },
-                body: `action=getPlayer&video_id=${videoId}`
-              });
-              
-              if (playerResp.ok) {
-                const playerData = await playerResp.json();
-                if (playerData.data?.video_url) {
-                  watchUrl = playerData.data.video_url;
-                }
-              }
-            }
+          } catch (err) {
+            // Erro na extração, mantém URL original (página HTML)
           }
-        } catch (err) {
-          // Fallback: mantém a URL original
         }
+        
+        // Só adiciona se a URL for .m3u8 (não página HTML)
+        if (watchUrl.includes('.m3u8') || watchUrl.includes('/hls/')) {
+          streams.push({
+            name: "WatchPlayer",
+            title: "720p",
+            url: watchUrl,
+            quality: 720,
+            type: "hls",
+            headers: {
+              "User-Agent": "Mozilla/5.0",
+              "Accept-Encoding": "identity",
+              "Referer": "https://watchplayer.xyz/",
+              "Origin": "https://watchplayer.xyz"
+            }
+          });
+        }
+      } catch (err) {
+        // Erro no WatchPlayer não afeta os outros
+        console.error("WatchPlayer falhou:", err.message);
       }
-      
-      streams.push({
-        name: "WatchPlayer",
-        title: "720p",
-        url: watchUrl,
-        quality: 720,
-        type: "hls",
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-          "Accept-Encoding": "identity",
-          "Referer": "https://watchplayer.xyz/",
-          "Origin": "https://watchplayer.xyz"
-        }
-      });
     }
     
     // ==============================================
-    // 4. Processa VIP Player (já dá .m3u8 direto)
+    // 4. Processa VIP Player (isolado)
     // ==============================================
     const vipPlayer = players.find(p => p.name === "VIP Player");
     if (vipPlayer) {
-      const hashMatch = vipPlayer.embedUrl.match(/\/video\/([a-f0-9]+)/);
-      if (hashMatch) {
-        const videoHash = hashMatch[1];
-        
-        try {
+      try {
+        const hashMatch = vipPlayer.embedUrl.match(/\/video\/([a-f0-9]+)/);
+        if (hashMatch) {
+          const videoHash = hashMatch[1];
+          
           const vipResp = await fetch(`https://embedplayer2.xyz/player/index.php?data=${videoHash}&do=getVideo`, {
             method: "POST",
             headers: {
@@ -200,9 +208,10 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
               });
             }
           }
-        } catch (err) {
-          // Falha silenciosa
         }
+      } catch (err) {
+        // Erro no VIP Player não afeta os outros
+        console.error("VIP Player falhou:", err.message);
       }
     }
     
