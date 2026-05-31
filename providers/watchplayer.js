@@ -1,5 +1,5 @@
 /**
- * Watch Brasil Provider - Versão Corrigida
+ * Watch Brasil Provider - Versão Corrigida para Filmes
  * Baseado no fluxo que funcionou via Python
  */
 
@@ -21,6 +21,7 @@ var __async = (__this, __arguments, generator) => {
 // ==============================================
 
 const WATCH_BASE_URL = "https://watchplayer.xyz";
+const PLAYERFLIX_BASE_URL = "https://playerflix.ink";
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
@@ -67,8 +68,60 @@ async function convertImdbToTmdb(imdbId, mediaType) {
   }
 }
 
+// Busca o ID interno do watchplayer baseado na busca
+async function searchWatchId(tmdbId, mediaType) {
+  try {
+    // Tenta buscar via API de busca
+    const searchUrl = `${WATCH_BASE_URL}/api/search?q=tmdb:${tmdbId}`;
+    const response = await fetch(searchUrl, { headers: HEADERS });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data.data && data.data.id) {
+        return { success: true, watchId: data.data.id };
+      }
+    }
+    
+    // Fallback: busca via scraping da página de busca
+    const searchPageUrl = `${WATCH_BASE_URL}/search/${tmdbId}`;
+    const searchRes = await fetch(searchPageUrl, { headers: HEADERS });
+    
+    if (searchRes.ok) {
+      const html = await searchRes.text();
+      
+      // Procura por links de filme ou série
+      let patterns = [];
+      if (mediaType === "movie") {
+        patterns = [
+          /href="\/filme\/(\d+)"/,
+          /data-movie-id="(\d+)"/,
+          /\/filme\/(\d+)/,
+          /id_movie=(\d+)/
+        ];
+      } else {
+        patterns = [
+          /href="\/tvshow\/(\d+)"/,
+          /data-tv-id="(\d+)"/,
+          /\/tvshow\/(\d+)/
+        ];
+      }
+      
+      for (const pattern of patterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+          return { success: true, watchId: match[1] };
+        }
+      }
+    }
+    
+    return { success: false, error: "ID não encontrado via search" };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
 // ==============================================
-// FUNÇÃO PRINCIPAL - FLUXO DIRETO (como no Python)
+// FUNÇÃO PRINCIPAL
 // ==============================================
 
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
@@ -103,51 +156,97 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     }
   }
 
-  const seasonNum = mediaType === "movie" ? 1 : (season || 1);
-  const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
+  const seasonNum = mediaType === "movie" ? null : (season || 1);
+  const episodeNum = mediaType === "movie" ? null : (episode || 1);
   addDebug(`📺 PARÂMETROS FINAIS`, `Tipo: ${mediaType}, Season: ${seasonNum}, Episode: ${episodeNum}`);
 
   try {
-    // NOTA IMPORTANTE: O watchplayer.xyz USA O PRÓPRIO TMDB ID COMO ID INTERNO!
-    // No exemplo que funcionou: tmdbId=46648 (True Detective) funcionou direto
-    // Então vamos usar o próprio TMDB ID como watchId
+    // Passo 0: Buscar o ID interno do watchplayer
+    addDebug(`🔎 [0/4] BUSCANDO ID INTERNO`, `TMDB ID: ${finalTmdbId}`);
     
-    const watchId = finalTmdbId;
-    addDebug(`✅ [1/3] USANDO TMDB ID COMO REFERÊNCIA`, watchId);
-
-    // Passo 1: Buscar HTML do episódio para extrair content_id
-    let episodeUrl;
-    if (mediaType === "movie") {
-      episodeUrl = `${WATCH_BASE_URL}/filme/${watchId}`;
+    const searchResult = await searchWatchId(finalTmdbId, mediaType);
+    let watchId;
+    
+    if (searchResult.success) {
+      watchId = searchResult.watchId;
+      addDebug(`✅ [0/4] ID INTERNO ENCONTRADO`, watchId);
     } else {
-      episodeUrl = `${WATCH_BASE_URL}/tvshow/${watchId}/${seasonNum}/${episodeNum}`;
+      // Fallback: tenta usar o próprio TMDB ID como fallback
+      watchId = finalTmdbId;
+      addDebug(`⚠️ [0/4] USANDO TMDB ID COMO FALLBACK`, `${watchId} (${searchResult.error})`);
+    }
+
+    // Passo 1: Buscar HTML do conteúdo
+    let contentUrl;
+    if (mediaType === "movie") {
+      contentUrl = `${WATCH_BASE_URL}/filme/${watchId}`;
+    } else {
+      contentUrl = `${WATCH_BASE_URL}/tvshow/${watchId}/${seasonNum}/${episodeNum}`;
     }
     
-    addDebug(`📡 [1/3] BUSCANDO EPISÓDIO`, episodeUrl);
+    addDebug(`📡 [1/4] BUSCANDO CONTEÚDO`, contentUrl);
     
-    const htmlResponse = await fetch(episodeUrl, { headers: HEADERS });
+    const htmlResponse = await fetch(contentUrl, { headers: HEADERS });
     if (!htmlResponse.ok) {
-      addDebug(`❌ [1/3] FALHA HTTP`, `Status: ${htmlResponse.status}`);
+      addDebug(`❌ [1/4] FALHA HTTP`, `Status: ${htmlResponse.status} - URL pode ser inválida`);
       return streams;
     }
     
     const html = await htmlResponse.text();
-    addDebug(`📄 [1/3] HTML RECEBIDO`, `${html.length} bytes`);
+    addDebug(`📄 [1/4] HTML RECEBIDO`, `${html.length} bytes`);
     
-    // Extrair content_id - padrão: data-contentid="1805"
-    const contentIdMatch = html.match(/data-contentid="(\d+)"/);
-    if (!contentIdMatch) {
-      addDebug(`❌ [1/3] CONTENT_ID NÃO ENCONTRADO`, `Procurando por data-contentid no HTML`);
-      // Mostra um trecho do HTML para debug
-      addDebug(`📄 HTML SAMPLE`, html.substring(0, 1000));
+    // Extrair content_id - para filmes é diferente
+    let contentId = null;
+    
+    if (mediaType === "movie") {
+      // Para filmes, procura padrões diferentes
+      const moviePatterns = [
+        /data-contentid="(\d+)"/,
+        /data-video-id="(\d+)"/,
+        /content_id['"]?\s*[:=]\s*['"]?(\d+)/,
+        /var\s+contentId\s*=\s*['"](\d+)['"]/,
+        /video_id\s*:\s*(\d+)/
+      ];
+      
+      for (const pattern of moviePatterns) {
+        const match = html.match(pattern);
+        if (match && match[1]) {
+          contentId = match[1];
+          break;
+        }
+      }
+      
+      // Se não achou, tenta pegar da API inline
+      if (!contentId) {
+        const apiMatch = html.match(/\/api[^"']*contentid[=:](\d+)/i);
+        if (apiMatch && apiMatch[1]) {
+          contentId = apiMatch[1];
+        }
+      }
+    } else {
+      // Para séries, usa o padrão já testado
+      const episodeMatch = html.match(new RegExp(`data-season="${seasonNum}"[^>]*data-episode="${episodeNum}"[^>]*data-contentid="(\\d+)"`));
+      if (episodeMatch && episodeMatch[1]) {
+        contentId = episodeMatch[1];
+      } else {
+        const fallbackMatch = html.match(/data-contentid="(\d+)"/);
+        if (fallbackMatch && fallbackMatch[1]) {
+          contentId = fallbackMatch[1];
+        }
+      }
+    }
+    
+    if (!contentId) {
+      addDebug(`❌ [1/4] CONTENT_ID NÃO ENCONTRADO`, `MediaType: ${mediaType}`);
+      // Mostra trecho do HTML para debug
+      addDebug(`📄 HTML SAMPLE (primeiros 2000 chars)`, html.substring(0, 2000));
       return streams;
     }
     
-    const contentId = contentIdMatch[1];
-    addDebug(`✅ [1/3] CONTENT_ID ENCONTRADO`, contentId);
+    addDebug(`✅ [1/4] CONTENT_ID ENCONTRADO`, contentId);
 
     // Passo 2: Obter options via API
-    addDebug(`📡 [2/3] BUSCANDO OPTIONS`, `contentid: ${contentId}`);
+    addDebug(`📡 [2/4] BUSCANDO OPTIONS`, `contentid: ${contentId}`);
     
     const optionsResponse = await fetch(`${WATCH_BASE_URL}/api`, {
       method: "POST",
@@ -160,23 +259,22 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     });
     
     if (!optionsResponse.ok) {
-      addDebug(`❌ [2/3] OPTIONS FALHOU`, `HTTP ${optionsResponse.status}`);
+      addDebug(`❌ [2/4] OPTIONS FALHOU`, `HTTP ${optionsResponse.status}`);
       return streams;
     }
     
     const optionsData = await optionsResponse.json();
-    addDebug(`📦 [2/3] OPTIONS RESPONSE`, optionsData);
+    addDebug(`📦 [2/4] OPTIONS RESPONSE`, optionsData);
     
     if (!optionsData.data?.options?.length) {
-      addDebug(`❌ [2/3] NENHUMA OPÇÃO DISPONÍVEL`, optionsData);
+      addDebug(`❌ [2/4] NENHUMA OPÇÃO DISPONÍVEL`, optionsData);
       return streams;
     }
     
-    // Coleta todos os video_ids disponíveis
     const videoOptions = optionsData.data.options;
-    addDebug(`✅ [2/3] ENCONTRADAS ${videoOptions.length} OPÇÕES`, videoOptions.map(o => ({ ID: o.ID, type: o.type })));
+    addDebug(`✅ [2/4] ENCONTRADAS ${videoOptions.length} OPÇÕES`, videoOptions.map(o => ({ ID: o.ID, type: o.type })));
     
-    // Para cada opção, buscar a URL do player
+    // Passo 3: Para cada opção, buscar URL do player
     const results = [];
     
     for (const option of videoOptions) {
@@ -184,7 +282,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
       const videoType = option.type;
       const audioType = videoType == 1 ? "Dublado" : (videoType == 2 ? "Legendado" : "Original");
       
-      addDebug(`🎬 [3/3] BUSCANDO PLAYER`, `video_id: ${videoId} (${audioType})`);
+      addDebug(`🎬 [3/4] BUSCANDO PLAYER`, `video_id: ${videoId} (${audioType})`);
       
       const playerResponse = await fetch(`${WATCH_BASE_URL}/api`, {
         method: "POST",
@@ -204,7 +302,11 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
         if (videoUrl) {
           // Processa URL de legendas se existir
           if (captionUrl && captionUrl === String(watchId)) {
-            captionUrl = `${WATCH_BASE_URL}/app/caption/${mediaType}/${watchId}/leg/s${seasonNum}e${episodeNum}.vtt`;
+            if (mediaType === "movie") {
+              captionUrl = `${WATCH_BASE_URL}/app/caption/movie/${watchId}/leg.vtt`;
+            } else {
+              captionUrl = `${WATCH_BASE_URL}/app/caption/tv/${watchId}/leg/s${seasonNum}e${episodeNum}.vtt`;
+            }
           }
           
           results.push({
@@ -234,7 +336,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     for (let i = 0; i < results.length; i++) {
       const result = results[i];
       streams.push({
-        name: "Watch Brasil",
+        name: "WatchPlayer",
         title: `${result.audio} - 1080p`,
         url: result.url,
         quality: 1080,
