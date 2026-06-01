@@ -1,6 +1,6 @@
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
-const PROXY_SOURCE_URL = "https://www.doramogo.net/series/dream-stage-2026-legendado/temporada-1/episodio-1";
+const CDN_PROXY = 'https://ondemand.netflxx.shop';
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0',
@@ -8,9 +8,6 @@ const HEADERS = {
 };
 
 const CACHE = {};
-let cachedProxies = null;
-let proxyExpiry = 0;
-const PROXY_CACHE_TIME = 60 * 60 * 1000;
 
 // Conversão de números para palavras (0-10)
 const NUMBER_WORDS = {
@@ -46,36 +43,6 @@ async function testUrl(url) {
         return response.ok || response.status === 206;
     } catch {
         return false;
-    }
-}
-
-// ==================== BUSCA AUTOMÁTICA DE PROXIES ====================
-
-async function fetchProxies() {
-    if (cachedProxies && Date.now() < proxyExpiry) {
-        return cachedProxies;
-    }
-    
-    try {
-        const response = await fetch(PROXY_SOURCE_URL, { headers: HEADERS });
-        if (!response.ok) return null;
-        
-        const html = await response.text();
-        
-        const primaryMatch = html.match(/const\s+PRIMARY_URL\s*=\s*['"]([^'"]+)['"]/);
-        const fallbackMatch = html.match(/const\s+FALLBACK_URL\s*=\s*['"]([^'"]+)['"]/);
-        
-        const proxies = {
-            primary: primaryMatch ? primaryMatch[1] : "https://ondemand.netflxx.shop",
-            fallback: fallbackMatch ? fallbackMatch[1] : "https://forks-doramas.netflxx.shop"
-        };
-        
-        cachedProxies = proxies;
-        proxyExpiry = Date.now() + PROXY_CACHE_TIME;
-        
-        return proxies;
-    } catch {
-        return null;
     }
 }
 
@@ -142,9 +109,8 @@ async function getTMDBTitle(tmdbId, mediaType) {
 // ==================== GERAÇÃO DE SLUGS ====================
 
 function generateSlugVariations(baseTitle, season, ano) {
-    // Gera variações com números convertidos E com números originais
-    const baseSlugWords = titleToSlug(baseTitle, true);   // "100" → "um-zero-zero"
-    const baseSlugNumbers = titleToSlug(baseTitle, false); // "100" → "100"
+    const baseSlugWords = titleToSlug(baseTitle, true);   // números → palavras
+    const baseSlugNumbers = titleToSlug(baseTitle, false); // números originais
     
     const variations = [];
     const seen = {};
@@ -156,13 +122,12 @@ function generateSlugVariations(baseTitle, season, ano) {
         }
     }
 
-    // Gera variações para ambos os tipos de slug
-    const slugBases = [baseSlugWords, baseSlugNumbers];
+    // Se forem diferentes, adiciona os dois
+    const slugBases = baseSlugWords === baseSlugNumbers 
+        ? [baseSlugWords] 
+        : [baseSlugWords, baseSlugNumbers];
     
     for (const baseSlug of slugBases) {
-        // Evita duplicar se forem iguais (quando não há números no título)
-        if (baseSlug === baseSlugNumbers && baseSlugWords === baseSlugNumbers) continue;
-        
         const words = baseSlug.split('-');
 
         add(baseSlug);
@@ -204,15 +169,6 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const seasonPadded = targetSeason.toString().padStart(2, '0');
     const timestamp = Date.now();
 
-    // Busca proxies atualizados
-    let proxies = await fetchProxies();
-    if (!proxies) {
-        proxies = {
-            primary: "https://ondemand.netflxx.shop",
-            fallback: "https://forks-doramas.netflxx.shop"
-        };
-    }
-
     // Conversão IMDb → TMDB
     let finalId = tmdbId;
     const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
@@ -235,24 +191,21 @@ async function getStreams(tmdbId, mediaType, season, episode) {
 
     const urls = [];
     const seen = new Set();
-    const cdnList = [proxies.primary, proxies.fallback];
 
     for (const slug of slugVariations) {
         const firstLetter = slug.charAt(0).toUpperCase() || 'T';
 
-        for (const cdn of cdnList) {
-            if (mediaType === 'movie') {
-                const url = cdn + '/' + firstLetter + '/' + slug + '/stream/stream.m3u8?nocache=' + timestamp;
-                if (!seen.has(url)) {
-                    seen.add(url);
-                    urls.push(url);
-                }
-            } else {
-                const url = cdn + '/' + firstLetter + '/' + slug + '/' + seasonPadded + '-temporada/' + epPadded + '/stream.m3u8?nocache=' + timestamp;
-                if (!seen.has(url)) {
-                    seen.add(url);
-                    urls.push(url);
-                }
+        if (mediaType === 'movie') {
+            const url = CDN_PROXY + '/' + firstLetter + '/' + slug + '/stream/stream.m3u8?nocache=' + timestamp;
+            if (!seen.has(url)) {
+                seen.add(url);
+                urls.push(url);
+            }
+        } else {
+            const url = CDN_PROXY + '/' + firstLetter + '/' + slug + '/' + seasonPadded + '-temporada/' + epPadded + '/stream.m3u8?nocache=' + timestamp;
+            if (!seen.has(url)) {
+                seen.add(url);
+                urls.push(url);
             }
         }
     }
