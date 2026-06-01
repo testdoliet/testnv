@@ -211,6 +211,14 @@ function filterInvalidSeasons(seasons) {
     return filtered;
 }
 
+// Espera manual (busy-wait) - compatível com Nuvio
+function manualDelay(ms) {
+    const start = Date.now();
+    while (Date.now() - start < ms) {
+        // busy wait
+    }
+}
+
 async function getAllSeasons(startId) {
     const allSeasons = [];
     const visited = new Set();
@@ -219,7 +227,7 @@ async function getAllSeasons(startId) {
         if (visited.has(animeId)) return;
         visited.add(animeId);
 
-        await new Promise(r => setTimeout(r, 1000));
+        manualDelay(1000);
 
         const anime = await getAnimeDetails(animeId);
         if (!anime) return;
@@ -277,7 +285,7 @@ function findSeasonByDate(seasons, targetDate) {
 
 function extractBaseTitle(fullTitle) {
     if (!fullTitle) return '';
-    const cleaned = fullTitle.replace(/[:\s]*(?:Part|Parte)\d+$/i, '').trim();
+    const cleaned = fullTitle.replace(/[:\s]*(?:Part|Parte)\s*\d+$/i, '').trim();
     if (!cleaned || cleaned.length < 3) return fullTitle;
     return cleaned;
 }
@@ -296,6 +304,9 @@ function isSignificantTitle(specificTitle, baseTitle) {
     return true;
 }
 
+// ==================== CORREÇÃO AQUI ====================
+// Regex corrigida: adicionado \s* antes de \d+$ para capturar "Part 2", "Parte 1", etc.
+
 function analyzeParts(seasons, targetEpisode, episodeDate) {
     const closest = findSeasonByDate(seasons, episodeDate);
     if (!closest) return null;
@@ -303,9 +314,9 @@ function analyzeParts(seasons, targetEpisode, episodeDate) {
     const groups = {};
     for (const s of seasons) {
         let base = s.title
-            .replace(/[:\s]*(?:Part|Parte)\d+$/i, '')
+            .replace(/[:\s]*(?:Part|Parte)\s*\d+$/i, '')
             .replace(/\s+\d+$/, '')
-            .replace(/[:\s]*(?:Season|Cour)\d+$/, '')
+            .replace(/[:\s]*(?:Season|Cour)\s*\d+$/, '')
             .trim();
 
         if (base.length < 3) base = s.title;
