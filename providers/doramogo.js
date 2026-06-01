@@ -1,27 +1,29 @@
 /**
- * Doramogo Provider - Com Accept-Encoding: identity (igual ao Pomfy)
+ * Doramogo Provider - Versão Corrigida
+ * Headers otimizados para compatibilidade com ExoPlayer/Nuvio
  */
 
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-// Headers para REQUISIÇÕES
-const REQUEST_HEADERS = {
+// Headers para REQUISIÇÕES INTERMEDIÁRIAS (buscar proxies, testar URL)
+const FETCH_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,image/apng,*/*;q=0.8",
     "Accept-Language": "pt-BR,pt;q=0.9",
     "Referer": "https://www.doramogo.net/",
     "Origin": "https://www.doramogo.net",
     "Cookie": "PHPSESSID=8vf7thq8lr33f6q1sk8v1f763a; _ga=GA1.1.616884067.1772822292"
 };
 
-// Headers para o STREAM (com Accept-Encoding: identity)
+// Headers para o STREAM FINAL (ExoPlayer)
+// - Referer e Cookie são necessários para o servidor liberar
+// - Accept: */* para não restringir o tipo de conteúdo
+// - Sem Accept-Encoding forçado (deixa o ExoPlayer negociar)
 const STREAM_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Referer": "https://www.doramogo.net/",
-    "Origin": "https://www.doramogo.net",
     "Cookie": "PHPSESSID=8vf7thq8lr33f6q1sk8v1f763a; _ga=GA1.1.616884067.1772822292",
-    "Accept-Encoding": "identity",  // ← ESSENCIAL! Evita compressão gzip/br
     "Accept": "*/*"
 };
 
@@ -52,7 +54,10 @@ async function convertImdbToTmdb(imdbId, mediaType, streams) {
     try {
         const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
         const response = await fetch(url, {
-            headers: { "User-Agent": REQUEST_HEADERS["User-Agent"], "Accept": "application/json" }
+            headers: { 
+                "User-Agent": FETCH_HEADERS["User-Agent"], 
+                "Accept": "application/json" 
+            }
         });
         
         if (!response.ok) return null;
@@ -85,7 +90,7 @@ async function fetchProxies(streams) {
     addDebug(streams, "🔍 BUSCANDO PROXYS", PROXY_SOURCE_URL);
     
     try {
-        const response = await fetch(PROXY_SOURCE_URL, { headers: REQUEST_HEADERS });
+        const response = await fetch(PROXY_SOURCE_URL, { headers: FETCH_HEADERS });
         if (!response.ok) return null;
         
         const html = await response.text();
@@ -107,6 +112,33 @@ async function fetchProxies(streams) {
     } catch (err) {
         addDebug(streams, "❌ ERRO", err.message);
         return null;
+    }
+}
+
+async function testUrl(url, streams) {
+    addDebug(streams, "📡 TESTANDO", url.substring(0, 80) + "...");
+    
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: FETCH_HEADERS
+        });
+        
+        // Debug: mostra o conteúdo do M3U8 para diagnóstico
+        const contentType = response.headers.get('content-type') || 'unknown';
+        const text = await response.text();
+        
+        addDebug(streams, "📡 RESPOSTA", 
+            `Status: ${response.status}\n` +
+            `Content-Type: ${contentType}\n` +
+            `Tamanho: ${text.length} bytes\n` +
+            `Início: ${text.substring(0, 200)}`
+        );
+        
+        return response.ok || response.status === 206;
+    } catch (err) {
+        addDebug(streams, "❌ ERRO", err.message);
+        return false;
     }
 }
 
@@ -145,8 +177,8 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-|-$/g, '');
         
-        const targetSeason = mediaType === 'movie' ? 1 : season;
-        const targetEpisode = mediaType === 'movie' ? 1 : episode;
+        const targetSeason = mediaType === "movie" ? 1 : season;
+        const targetEpisode = mediaType === "movie" ? 1 : episode;
         const epPadded = targetEpisode.toString().padStart(2, '0');
         const seasonPadded = targetSeason.toString().padStart(2, '0');
         const timestamp = Date.now();
@@ -160,33 +192,26 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         ];
         
         for (const url of urlsToTry) {
-            addDebug(streams, "📡 TESTANDO", url.substring(0, 100));
+            const isValid = await testUrl(url, streams);
             
-            try {
-                const testResponse = await fetch(url, {
-                    method: 'GET',
-                    headers: REQUEST_HEADERS
-                });
+            if (isValid) {
+                addDebug(streams, "✅ STREAM ENCONTRADO", url.substring(0, 100));
                 
-                if (testResponse.ok) {
-                    addDebug(streams, "✅ OK", `HTTP ${testResponse.status}`);
-                    
-                    // ==============================================
-                    // STREAM COM Accept-Encoding: identity
-                    // Isso evita compressão gzip/br que quebra o parsing
-                    // ==============================================
-                    streams.push({
-                        name: "Doramogo",
-                        title: "1080p",
-                        url: url,
-                        quality: 1080,
-                        type: "hls",
-                        headers: STREAM_HEADERS  // ← com Accept-Encoding: identity
-                    });
-                    return streams;
-                }
-            } catch (err) {
-                addDebug(streams, "❌ ERRO", err.message);
+                // ==============================================
+                // STREAM FINAL: Headers mínimos necessários
+                // Referer + Cookie para autenticação
+                // Accept: */* para não restringir
+                // Sem Accept-Encoding forçado
+                // ==============================================
+                streams.push({
+                    name: "Doramogo",
+                    title: "1080p",
+                    url: url,
+                    quality: 1080,
+                    type: "hls",
+                    headers: STREAM_HEADERS
+                });
+                return streams;
             }
         }
         
