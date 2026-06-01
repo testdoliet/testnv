@@ -1,6 +1,6 @@
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
-const CDN_PROXY = 'https://ondemand.towns3.shop';
+const PROXY_SOURCE_URL = "https://www.doramogo.net/series/dream-stage-2026-legendado/temporada-1/episodio-1";
 
 const HEADERS = {
     'User-Agent': 'Mozilla/5.0',
@@ -8,6 +8,9 @@ const HEADERS = {
 };
 
 const CACHE = {};
+let cachedProxies = null;
+let proxyExpiry = 0;
+const PROXY_CACHE_TIME = 60 * 60 * 1000;
 
 // Conversão de números para palavras (0-10)
 const NUMBER_WORDS = {
@@ -23,7 +26,6 @@ function numberToWords(numStr) {
 function titleToSlug(title) {
     if (!title) return '';
     
-    // Converte números para palavras (ex: 100 → um-zero-zero)
     const withWords = title.replace(/\d+/g, match => numberToWords(match));
     
     return withWords.toLowerCase()
@@ -41,6 +43,36 @@ async function testUrl(url) {
         return response.ok || response.status === 206;
     } catch {
         return false;
+    }
+}
+
+// ==================== BUSCA AUTOMÁTICA DE PROXIES ====================
+
+async function fetchProxies() {
+    if (cachedProxies && Date.now() < proxyExpiry) {
+        return cachedProxies;
+    }
+    
+    try {
+        const response = await fetch(PROXY_SOURCE_URL, { headers: HEADERS });
+        if (!response.ok) return null;
+        
+        const html = await response.text();
+        
+        const primaryMatch = html.match(/const\s+PRIMARY_URL\s*=\s*['"]([^'"]+)['"]/);
+        const fallbackMatch = html.match(/const\s+FALLBACK_URL\s*=\s*['"]([^'"]+)['"]/);
+        
+        const proxies = {
+            primary: primaryMatch ? primaryMatch[1] : "https://ondemand.netflxx.shop",
+            fallback: fallbackMatch ? fallbackMatch[1] : "https://forks-doramas.netflxx.shop"
+        };
+        
+        cachedProxies = proxies;
+        proxyExpiry = Date.now() + PROXY_CACHE_TIME;
+        
+        return proxies;
+    } catch {
+        return null;
     }
 }
 
@@ -337,7 +369,6 @@ function generateSlugVariations(baseTitle, season, ano, animeInfo = null) {
         if (ano) add(baseSlug + '-' + ano + '-' + season);
     }
 
-    // Slugs específicos para anime
     if (animeInfo) {
         const animeSlug = titleToSlug(animeInfo.title);
         add(animeSlug);
@@ -380,16 +411,45 @@ function generateSlugVariations(baseTitle, season, ano, animeInfo = null) {
 // ==================== FUNÇÃO PRINCIPAL ====================
 
 async function getStreams(tmdbId, mediaType, season, episode) {
+    const debugs = [];
+    
+    const addDebug = (title, content) => {
+        debugs.push({
+            name: "Doramogo [DEBUG]",
+            title: title,
+            url: typeof content === 'object' ? JSON.stringify(content) : String(content),
+            quality: 0,
+            headers: {}
+        });
+    };
+    
+    addDebug("🎬 INÍCIO", `ID: ${tmdbId} | ${mediaType} | S${season}E${episode}`);
+    
+    // Busca proxies atualizados
+    let proxies = await fetchProxies();
+    if (!proxies) {
+        proxies = {
+            primary: "https://ondemand.netflxx.shop",
+            fallback: "https://forks-doramas.netflxx.shop"
+        };
+        addDebug("⚠️ PROXIES", "Usando fallback padrão");
+    } else {
+        addDebug("✅ PROXIES", `Primary: ${proxies.primary} | Fallback: ${proxies.fallback}`);
+    }
+    
     // Conversão IMDb → TMDB
     let finalId = tmdbId;
     const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
     
     if (isImdb) {
+        addDebug("🔄 CONVERTENDO IMDb", tmdbId);
         const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
         if (convertedId) {
             finalId = convertedId;
+            addDebug("✅ IMDb CONVERTIDO", `TMDB ID: ${finalId}`);
         } else {
-            return [];
+            addDebug("❌ FALHA IMDb", "Não foi possível converter");
+            return debugs;
         }
     }
     
@@ -400,15 +460,21 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const timestamp = Date.now();
 
     const info = await getTMDBTitle(finalId, mediaType);
-    if (!info) return [];
+    if (!info) {
+        addDebug("❌ SEM TÍTULO", "TMDB não retornou dados");
+        return debugs;
+    }
     
     const { title, ano } = info;
+    addDebug("📺 TÍTULO TMDB", `${title} (${ano || 'sem ano'})`);
     
     // Detecção de anime
     let animeInfo = null;
     const animeDetected = mediaType === 'tv' ? await isAnime(finalId) : false;
     
     if (animeDetected) {
+        addDebug("🎌 ANIME DETECTADO", "Buscando no Anilist...");
+        
         try {
             const episodeDate = await getTMDBEpisodeDate(finalId, targetSeason, targetEpisode);
             
@@ -416,6 +482,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 const anilistId = await searchAnilistId(title);
                 
                 if (anilistId) {
+                    addDebug("🔗 ANILIST ID", anilistId);
                     const allSeasons = await getAllSeasons(anilistId);
                     
                     if (allSeasons.length) {
@@ -423,55 +490,70 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                         
                         if (seasonInfo) {
                             animeInfo = seasonInfo;
+                            addDebug("✅ MATCH ANILIST", `Parte ${seasonInfo.partNumber}, Ep ${seasonInfo.episodeInPart}`);
                         }
                     }
                 }
             }
-        } catch {
-            // Fallback para método padrão
+        } catch (err) {
+            addDebug("⚠️ ERRO ANILIST", err.message);
         }
     }
 
     const slugVariations = generateSlugVariations(title, targetSeason, ano, animeInfo);
+    addDebug("🔤 SLUGS", `${slugVariations.length} variações`);
 
     const urls = [];
     const seen = new Set();
+    const cdnList = [proxies.primary, proxies.fallback];
 
     for (const slug of slugVariations) {
         const firstLetter = slug.charAt(0).toUpperCase() || 'T';
 
-        if (mediaType === 'movie') {
-            const url = CDN_PROXY + '/' + firstLetter + '/' + slug + '/stream/stream.m3u8?nocache=' + timestamp;
-            if (!seen.has(url)) {
-                seen.add(url);
-                urls.push(url);
-            }
-        } else {
-            const url = CDN_PROXY + '/' + firstLetter + '/' + slug + '/' + seasonPadded + '-temporada/' + epPadded + '/stream.m3u8?nocache=' + timestamp;
-            if (!seen.has(url)) {
-                seen.add(url);
-                urls.push(url);
+        for (const cdn of cdnList) {
+            if (mediaType === 'movie') {
+                const url = cdn + '/' + firstLetter + '/' + slug + '/stream/stream.m3u8?nocache=' + timestamp;
+                if (!seen.has(url)) {
+                    seen.add(url);
+                    urls.push(url);
+                }
+            } else {
+                const url = cdn + '/' + firstLetter + '/' + slug + '/' + seasonPadded + '-temporada/' + epPadded + '/stream.m3u8?nocache=' + timestamp;
+                if (!seen.has(url)) {
+                    seen.add(url);
+                    urls.push(url);
+                }
             }
         }
     }
 
+    addDebug("🔗 URLS PARA TESTAR", `${urls.length} combinações (${cdnList.length} CDNs × ${slugVariations.length} slugs)`);
+
     for (const url of urls) {
+        addDebug("📡 TESTANDO", url.substring(0, 80) + '...');
+        
         if (await testUrl(url)) {
+            addDebug("✅ ENCONTRADO", url);
+            
             let displayTitle = mediaType === 'movie' ? title : `${title} S${targetSeason} EP${targetEpisode}`;
             if (animeInfo && animeInfo.episodeInPart !== targetEpisode) {
                 displayTitle += ` (Parte ${animeInfo.partNumber} - Ep ${animeInfo.episodeInPart})`;
             }
             
-            return [{
+            const result = [{
                 url,
                 headers: HEADERS,
                 name: animeDetected ? 'Animes 1080p' : 'Doramogo 1080p',
                 title: displayTitle
             }];
+            
+            // Retorna o stream + debugs
+            return [...result, ...debugs];
         }
     }
 
-    return [];
+    addDebug("❌ FIM", "Nenhum stream encontrado");
+    return debugs;
 }
 
 if (typeof module !== 'undefined' && module.exports) {
