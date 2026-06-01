@@ -1,18 +1,28 @@
 /**
- * Doramogo Provider - Seguindo a abordagem do Pomfy (sem headers no stream)
+ * Doramogo Provider - Com Accept-Encoding: identity (igual ao Pomfy)
  */
 
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 
-// Headers para REQUISIÇÕES (buscar proxies, etc.) - NÃO para o stream
-const HEADERS = {
+// Headers para REQUISIÇÕES
+const REQUEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,image/apng,*/*;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "pt-BR,pt;q=0.9",
     "Referer": "https://www.doramogo.net/",
     "Origin": "https://www.doramogo.net",
     "Cookie": "PHPSESSID=8vf7thq8lr33f6q1sk8v1f763a; _ga=GA1.1.616884067.1772822292"
+};
+
+// Headers para o STREAM (com Accept-Encoding: identity)
+const STREAM_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://www.doramogo.net/",
+    "Origin": "https://www.doramogo.net",
+    "Cookie": "PHPSESSID=8vf7thq8lr33f6q1sk8v1f763a; _ga=GA1.1.616884067.1772822292",
+    "Accept-Encoding": "identity",  // ← ESSENCIAL! Evita compressão gzip/br
+    "Accept": "*/*"
 };
 
 const PROXY_SOURCE_URL = "https://www.doramogo.net/series/dream-stage-2026-legendado/temporada-1/episodio-1";
@@ -42,7 +52,7 @@ async function convertImdbToTmdb(imdbId, mediaType, streams) {
     try {
         const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
         const response = await fetch(url, {
-            headers: { "User-Agent": HEADERS["User-Agent"], "Accept": "application/json" }
+            headers: { "User-Agent": REQUEST_HEADERS["User-Agent"], "Accept": "application/json" }
         });
         
         if (!response.ok) return null;
@@ -75,7 +85,7 @@ async function fetchProxies(streams) {
     addDebug(streams, "🔍 BUSCANDO PROXYS", PROXY_SOURCE_URL);
     
     try {
-        const response = await fetch(PROXY_SOURCE_URL, { headers: HEADERS });
+        const response = await fetch(PROXY_SOURCE_URL, { headers: REQUEST_HEADERS });
         if (!response.ok) return null;
         
         const html = await response.text();
@@ -97,23 +107,6 @@ async function fetchProxies(streams) {
     } catch (err) {
         addDebug(streams, "❌ ERRO", err.message);
         return null;
-    }
-}
-
-async function testUrl(url, streams) {
-    addDebug(streams, "📡 TESTANDO", url.substring(0, 80) + "...");
-    
-    try {
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: HEADERS
-        });
-        
-        addDebug(streams, "📡 STATUS", `HTTP ${response.status}`);
-        return response.ok || response.status === 206;
-    } catch (err) {
-        addDebug(streams, "❌ ERRO", err.message);
-        return false;
     }
 }
 
@@ -167,24 +160,33 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         ];
         
         for (const url of urlsToTry) {
-            const isValid = await testUrl(url, streams);
+            addDebug(streams, "📡 TESTANDO", url.substring(0, 100));
             
-            if (isValid) {
-                addDebug(streams, "✅ STREAM ENCONTRADO", url.substring(0, 100));
-                
-                // ==============================================
-                // IGUAL AO POMFY: SEM HEADERS NO STREAM!
-                // Deixa o Nuvio gerenciar os headers automaticamente
-                // ==============================================
-                streams.push({
-                    name: "Doramogo",
-                    title: "1080p",
-                    url: url,
-                    quality: 1080,
-                    type: "hls"
-                    // SEM HEADERS!
+            try {
+                const testResponse = await fetch(url, {
+                    method: 'GET',
+                    headers: REQUEST_HEADERS
                 });
-                return streams;
+                
+                if (testResponse.ok) {
+                    addDebug(streams, "✅ OK", `HTTP ${testResponse.status}`);
+                    
+                    // ==============================================
+                    // STREAM COM Accept-Encoding: identity
+                    // Isso evita compressão gzip/br que quebra o parsing
+                    // ==============================================
+                    streams.push({
+                        name: "Doramogo",
+                        title: "1080p",
+                        url: url,
+                        quality: 1080,
+                        type: "hls",
+                        headers: STREAM_HEADERS  // ← com Accept-Encoding: identity
+                    });
+                    return streams;
+                }
+            } catch (err) {
+                addDebug(streams, "❌ ERRO", err.message);
             }
         }
         
