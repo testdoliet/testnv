@@ -44,6 +44,38 @@ async function testUrl(url) {
     }
 }
 
+// ==================== CONVERSOR IMDb → TMDB ====================
+
+async function convertImdbToTmdb(imdbId, mediaType) {
+    try {
+        const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+        const response = await fetch(url, {
+            headers: { 
+                "User-Agent": HEADERS['User-Agent'], 
+                "Accept": "application/json" 
+            }
+        });
+        
+        if (!response.ok) return null;
+        
+        const data = await response.json();
+        
+        if (mediaType === "movie") {
+            if (data.movie_results && data.movie_results.length > 0) {
+                return data.movie_results[0].id;
+            }
+        } else {
+            if (data.tv_results && data.tv_results.length > 0) {
+                return data.tv_results[0].id;
+            }
+        }
+        
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 // ==================== FUNÇÕES TMDB ====================
 
 async function getTMDBTitle(tmdbId, mediaType) {
@@ -348,24 +380,37 @@ function generateSlugVariations(baseTitle, season, ano, animeInfo = null) {
 // ==================== FUNÇÃO PRINCIPAL ====================
 
 async function getStreams(tmdbId, mediaType, season, episode) {
+    // Conversão IMDb → TMDB
+    let finalId = tmdbId;
+    const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
+    
+    if (isImdb) {
+        const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
+        if (convertedId) {
+            finalId = convertedId;
+        } else {
+            return [];
+        }
+    }
+    
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     const epPadded = targetEpisode.toString().padStart(2, '0');
     const seasonPadded = targetSeason.toString().padStart(2, '0');
     const timestamp = Date.now();
 
-    const info = await getTMDBTitle(tmdbId, mediaType);
+    const info = await getTMDBTitle(finalId, mediaType);
     if (!info) return [];
     
     const { title, ano } = info;
     
     // Detecção de anime
     let animeInfo = null;
-    const animeDetected = mediaType === 'tv' ? await isAnime(tmdbId) : false;
+    const animeDetected = mediaType === 'tv' ? await isAnime(finalId) : false;
     
     if (animeDetected) {
         try {
-            const episodeDate = await getTMDBEpisodeDate(tmdbId, targetSeason, targetEpisode);
+            const episodeDate = await getTMDBEpisodeDate(finalId, targetSeason, targetEpisode);
             
             if (episodeDate) {
                 const anilistId = await searchAnilistId(title);
