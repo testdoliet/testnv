@@ -1,130 +1,39 @@
-/**
- * Pomfy - Provider com Byse/9n8o
- * Versão Final: 100% Manual (Sem Buffer/Crypto)
- * SEM HEADERS PERSONALIZADOS - Deixa o Nuvio gerenciar
- */
-
-var __async = (__this, __arguments, generator) => {
-  return new Promise((resolve, reject) => {
-    var fulfilled = (value) => {
-      try { step(generator.next(value)); } catch (e) { reject(e); }
-    };
-    var rejected = (value) => {
-      try { step(generator.throw(value)); } catch (e) { reject(e); }
-    };
-    var step = (x) => x.done ? resolve(x.value) : Promise.resolve(x.value).then(fulfilled, rejected);
-    step((generator = generator.apply(__this, __arguments)).next());
-  });
-};
-
-// ==============================================
-// CONSTANTS
-// ==============================================
-
 const API_POMFY = "https://api.pomfy.stream";
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const COOKIE = "SITE_TOTAL_ID=aTYqe6GU65PNmeCXpelwJwAAAMi; __dtsu=104017651574995957BEB724C6373F9E; __cc_id=a44d1e52993b9c2Oaaf40eba24989a06";
 
-const USER_AGENT = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36";
+const USER_AGENTS = [
+  "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36",
+  "Mozilla/5.0 (Linux; Android 11; SM-A525F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36",
+  "Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1"
+];
 
-const HEADERS = {
-  "User-Agent": USER_AGENT,
-  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,webp,image/apng,*/*;q=0.8",
-  "Accept-Language": "pt-BR,pt;q=0.9",
-  "Referer": "https://pomfy.online/",
-  "Sec-Fetch-Dest": "iframe",
-  "Sec-Fetch-Mode": "navigate",
-  "Sec-Fetch-Site": "cross-site",
-  "Upgrade-Insecure-Requests": "1"
+let uaIndex = 0;
+const getUA = () => {
+  const ua = USER_AGENTS[uaIndex];
+  uaIndex = (uaIndex + 1) % USER_AGENTS.length;
+  return ua;
 };
 
+const getHeaders = (referer, isJson = false) => ({
+  "User-Agent": getUA(),
+  "Accept": isJson ? "*/*" : "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "pt-BR,pt;q=0.9",
+  "Referer": referer || "https://pomfy.online/",
+  "Sec-Fetch-Dest": isJson ? "empty" : "iframe",
+  "Sec-Fetch-Mode": isJson ? "cors" : "navigate",
+  "Sec-Fetch-Site": "cross-site",
+  "Upgrade-Insecure-Requests": isJson ? undefined : "1",
+  "Content-Type": isJson ? "application/json" : undefined
+});
+
 // ==============================================
-// BASE64 MANUAL
+// BASE64 & AES MANUAL
 // ==============================================
 
 const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-function base64ToBytes(base64) {
-  let b64 = base64.replace(/-/g, '+').replace(/_/g, '/');
-  while (b64.length % 4 !== 0) b64 += '=';
-  const lookup = new Uint8Array(256).fill(255);
-  for (let i = 0; i < 64; i++) lookup[BASE64_CHARS.charCodeAt(i)] = i;
-  const len = b64.length;
-  let outputLen = (len * 3) >> 2;
-  if (b64[len - 1] === '=') outputLen--;
-  if (b64[len - 2] === '=') outputLen--;
-  const bytes = new Uint8Array(outputLen);
-  let byteIdx = 0;
-  for (let i = 0; i < len; i += 4) {
-    const a = lookup[b64.charCodeAt(i)];
-    const b = lookup[b64.charCodeAt(i + 1)];
-    const c = lookup[b64.charCodeAt(i + 2)];
-    const d = lookup[b64.charCodeAt(i + 3)];
-    if (byteIdx < outputLen) bytes[byteIdx++] = (a << 2) | (b >> 4);
-    if (byteIdx < outputLen) bytes[byteIdx++] = ((b & 0x0f) << 4) | (c >> 2);
-    if (byteIdx < outputLen) bytes[byteIdx++] = ((c & 0x03) << 6) | d;
-  }
-  return bytes;
-}
-
-function bytesToBase64(bytes) {
-  let result = '';
-  const len = bytes.length;
-  for (let i = 0; i < len; i += 3) {
-    const b0 = bytes[i];
-    const b1 = i + 1 < len ? bytes[i + 1] : 0;
-    const b2 = i + 2 < len ? bytes[i + 2] : 0;
-    result += BASE64_CHARS[b0 >> 2];
-    result += BASE64_CHARS[((b0 & 0x03) << 4) | (b1 >> 4)];
-    result += i + 1 < len ? BASE64_CHARS[((b1 & 0x0f) << 2) | (b2 >> 6)] : '=';
-    result += i + 2 < len ? BASE64_CHARS[b2 & 0x3f] : '=';
-  }
-  return result;
-}
-
-function utf8BytesToString(bytes) {
-  let str = '';
-  let i = 0;
-  while (i < bytes.length) {
-    const byte = bytes[i];
-    if (byte < 0x80) { str += String.fromCharCode(byte); i += 1; }
-    else if ((byte & 0xe0) === 0xc0) { str += String.fromCharCode(((byte & 0x1f) << 6) | (bytes[i + 1] & 0x3f)); i += 2; }
-    else if ((byte & 0xf0) === 0xe0) { str += String.fromCharCode(((byte & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f)); i += 3; }
-    else if ((byte & 0xf8) === 0xf0) {
-      const cp = ((byte & 0x07) << 18) | ((bytes[i + 1] & 0x3f) << 12) | ((bytes[i + 2] & 0x3f) << 6) | (bytes[i + 3] & 0x3f);
-      const hi = Math.floor((cp - 0x10000) / 0x400) + 0xd800;
-      const lo = ((cp - 0x10000) % 0x400) + 0xdc00;
-      str += String.fromCharCode(hi, lo);
-      i += 4;
-    } else { i += 1; }
-  }
-  return str;
-}
-
-function stringToUtf8Bytes(str) {
-  const bytes = [];
-  for (let i = 0; i < str.length; i++) {
-    let cp = str.charCodeAt(i);
-    if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < str.length) {
-      const lo = str.charCodeAt(i + 1);
-      if (lo >= 0xdc00 && lo <= 0xdfff) {
-        cp = 0x10000 + (cp - 0xd800) * 0x400 + (lo - 0xdc00);
-        i++;
-      }
-    }
-    if (cp < 0x80) { bytes.push(cp); }
-    else if (cp < 0x800) { bytes.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f)); }
-    else if (cp < 0x10000) { bytes.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f)); }
-    else { bytes.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f)); }
-  }
-  return new Uint8Array(bytes);
-}
-
-// ==============================================
-// AES-256-GCM MANUAL
-// ==============================================
-
 const SBOX = [
   0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
   0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
@@ -143,434 +52,265 @@ const SBOX = [
   0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
   0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
 ];
-
 const RCON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
 
-class AES256GCM_Manual {
-  constructor(key) { this.roundKeys = this._expandKey(key); }
-  
+function base64ToBytes(b64) {
+  b64 = b64.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4 !== 0) b64 += '=';
+  const lookup = new Uint8Array(256).fill(255);
+  for (let i = 0; i < 64; i++) lookup[BASE64_CHARS.charCodeAt(i)] = i;
+  const len = b64.length;
+  let outLen = (len * 3) >> 2;
+  if (b64[len - 1] === '=') outLen--;
+  if (b64[len - 2] === '=') outLen--;
+  const bytes = new Uint8Array(outLen);
+  let idx = 0;
+  for (let i = 0; i < len; i += 4) {
+    const a = lookup[b64.charCodeAt(i)], b = lookup[b64.charCodeAt(i + 1)];
+    const c = lookup[b64.charCodeAt(i + 2)], d = lookup[b64.charCodeAt(i + 3)];
+    if (idx < outLen) bytes[idx++] = (a << 2) | (b >> 4);
+    if (idx < outLen) bytes[idx++] = ((b & 0x0f) << 4) | (c >> 2);
+    if (idx < outLen) bytes[idx++] = ((c & 0x03) << 6) | d;
+  }
+  return bytes;
+}
+
+function bytesToBase64(bytes) {
+  let res = '';
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i], b1 = i + 1 < len ? bytes[i + 1] : 0, b2 = i + 2 < len ? bytes[i + 2] : 0;
+    res += BASE64_CHARS[b0 >> 2];
+    res += BASE64_CHARS[((b0 & 0x03) << 4) | (b1 >> 4)];
+    res += i + 1 < len ? BASE64_CHARS[((b1 & 0x0f) << 2) | (b2 >> 6)] : '=';
+    res += i + 2 < len ? BASE64_CHARS[b2 & 0x3f] : '=';
+  }
+  return res;
+}
+
+function utf8BytesToString(bytes) {
+  let str = '', i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i];
+    if (b < 0x80) { str += String.fromCharCode(b); i++; }
+    else if ((b & 0xe0) === 0xc0) { str += String.fromCharCode(((b & 0x1f) << 6) | (bytes[i + 1] & 0x3f)); i += 2; }
+    else if ((b & 0xf0) === 0xe0) { str += String.fromCharCode(((b & 0x0f) << 12) | ((bytes[i + 1] & 0x3f) << 6) | (bytes[i + 2] & 0x3f)); i += 3; }
+    else {
+      const cp = ((b & 0x07) << 18) | ((bytes[i + 1] & 0x3f) << 12) | ((bytes[i + 2] & 0x3f) << 6) | (bytes[i + 3] & 0x3f);
+      str += String.fromCharCode(0xd800 + Math.floor((cp - 0x10000) / 0x400), 0xdc00 + ((cp - 0x10000) % 0x400));
+      i += 4;
+    }
+  }
+  return str;
+}
+
+class AES256GCM {
+  constructor(key) { this.rk = this._expandKey(key); }
   _expandKey(key) {
     let w = new Uint32Array(60);
-    for (let i = 0; i < 8; i++) { w[i] = (key[i * 4] << 24) | (key[i * 4 + 1] << 16) | (key[i * 4 + 2] << 8) | key[i * 4 + 3]; }
+    for (let i = 0; i < 8; i++) w[i] = (key[i*4]<<24)|(key[i*4+1]<<16)|(key[i*4+2]<<8)|key[i*4+3];
     for (let i = 8; i < 60; i++) {
-      let temp = w[i - 1];
-      if (i % 8 === 0) {
-        temp = ((temp << 8) | (temp >>> 24)) >>> 0;
-        temp = (SBOX[temp >>> 24] << 24) | (SBOX[(temp >>> 16) & 0xff] << 16) | (SBOX[(temp >>> 8) & 0xff] << 8) | SBOX[temp & 0xff];
-        temp ^= (RCON[i / 8] << 24) >>> 0;
-      } else if (i % 8 === 4) {
-        temp = (SBOX[temp >>> 24] << 24) | (SBOX[(temp >>> 16) & 0xff] << 16) | (SBOX[(temp >>> 8) & 0xff] << 8) | SBOX[temp & 0xff];
+      let t = w[i-1];
+      if (i%8===0) {
+        t = ((t<<8)|(t>>>24))>>>0;
+        t = (SBOX[t>>>24]<<24)|(SBOX[(t>>>16)&0xff]<<16)|(SBOX[(t>>>8)&0xff]<<8)|SBOX[t&0xff];
+        t ^= (RCON[i/8]<<24)>>>0;
+      } else if (i%8===4) {
+        t = (SBOX[t>>>24]<<24)|(SBOX[(t>>>16)&0xff]<<16)|(SBOX[(t>>>8)&0xff]<<8)|SBOX[t&0xff];
       }
-      w[i] = (w[i - 8] ^ temp) >>> 0;
+      w[i] = (w[i-8]^t)>>>0;
     }
     return w;
   }
-  
-  _galoisMult(a, b) {
+  _gMult(a, b) {
     let p = 0;
     for (let i = 0; i < 8; i++) {
       if (b & 1) p ^= a;
-      let hiBitSet = a & 0x80;
+      const h = a & 0x80;
       a = (a << 1) & 0xff;
-      if (hiBitSet) a ^= 0x1b;
+      if (h) a ^= 0x1b;
       b >>= 1;
     }
     return p;
   }
-  
-  _encryptBlock(block) {
-    let state = Array.from({ length: 4 }, (_, r) => Array.from({ length: 4 }, (_, c) => block[r + c * 4]));
-    const addRoundKey = (s, rkIdx) => {
-      for (let c = 0; c < 4; c++) {
-        let rk = this.roundKeys[rkIdx * 4 + c];
-        for (let r = 0; r < 4; r++) { s[r][c] ^= (rk >>> (24 - 8 * r)) & 0xff; }
+  _encBlock(block) {
+    let s = Array.from({length:4}, (_,r) => Array.from({length:4}, (_,c) => block[r+c*4]));
+    const ark = (idx) => {
+      for (let c=0; c<4; c++) {
+        const rk = this.rk[idx*4+c];
+        for (let r=0; r<4; r++) s[r][c] ^= (rk>>>(24-8*r))&0xff;
       }
     };
-    addRoundKey(state, 0);
-    for (let round = 1; round < 14; round++) {
-      for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) state[r][c] = SBOX[state[r][c]];
-      let row1 = state[1], row2 = state[2], row3 = state[3];
-      state[1] = [row1[1], row1[2], row1[3], row1[0]];
-      state[2] = [row2[2], row2[3], row2[0], row2[1]];
-      state[3] = [row3[3], row3[0], row3[1], row3[2]];
-      for (let c = 0; c < 4; c++) {
-        let s0 = state[0][c], s1 = state[1][c], s2 = state[2][c], s3 = state[3][c];
-        state[0][c] = this._galoisMult(0x02, s0) ^ this._galoisMult(0x03, s1) ^ s2 ^ s3;
-        state[1][c] = s0 ^ this._galoisMult(0x02, s1) ^ this._galoisMult(0x03, s2) ^ s3;
-        state[2][c] = s0 ^ s1 ^ this._galoisMult(0x02, s2) ^ this._galoisMult(0x03, s3);
-        state[3][c] = this._galoisMult(0x03, s0) ^ s1 ^ s2 ^ this._galoisMult(0x02, s3);
+    ark(0);
+    for (let r=1; r<14; r++) {
+      for (let i=0; i<4; i++) for (let j=0; j<4; j++) s[i][j] = SBOX[s[i][j]];
+      const t1=s[1], t2=s[2], t3=s[3];
+      s[1]=[t1[1],t1[2],t1[3],t1[0]]; s[2]=[t2[2],t2[3],t2[0],t2[1]]; s[3]=[t3[3],t3[0],t3[1],t3[2]];
+      for (let c=0; c<4; c++) {
+        const [s0,s1,s2,s3] = [s[0][c],s[1][c],s[2][c],s[3][c]];
+        s[0][c] = this._gMult(2,s0)^this._gMult(3,s1)^s2^s3;
+        s[1][c] = s0^this._gMult(2,s1)^this._gMult(3,s2)^s3;
+        s[2][c] = s0^s1^this._gMult(2,s2)^this._gMult(3,s3);
+        s[3][c] = this._gMult(3,s0)^s1^s2^this._gMult(2,s3);
       }
-      addRoundKey(state, round);
+      ark(r);
     }
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) state[r][c] = SBOX[state[r][c]];
-    let row1 = state[1], row2 = state[2], row3 = state[3];
-    state[1] = [row1[1], row1[2], row1[3], row1[0]];
-    state[2] = [row2[2], row2[3], row2[0], row2[1]];
-    state[3] = [row3[3], row3[0], row3[1], row3[2]];
-    addRoundKey(state, 14);
-    let res = new Uint8Array(16);
-    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) res[c * 4 + r] = state[r][c];
+    for (let i=0; i<4; i++) for (let j=0; j<4; j++) s[i][j] = SBOX[s[i][j]];
+    const t1=s[1], t2=s[2], t3=s[3];
+    s[1]=[t1[1],t1[2],t1[3],t1[0]]; s[2]=[t2[2],t2[3],t2[0],t2[1]]; s[3]=[t3[3],t3[0],t3[1],t3[2]];
+    ark(14);
+    const res = new Uint8Array(16);
+    for (let c=0; c<4; c++) for (let r=0; r<4; r++) res[c*4+r] = s[r][c];
     return res;
   }
-  
-  decrypt(iv, ciphertext) {
-    let counter = new Uint8Array(16);
-    counter.set(iv);
-    counter[15] = 2;
-    let plaintext = new Uint8Array(ciphertext.length);
-    for (let i = 0; i < ciphertext.length; i += 16) {
-      let keystream = this._encryptBlock(counter);
-      for (let j = 0; j < 16 && (i + j) < ciphertext.length; j++) { plaintext[i + j] = ciphertext[i + j] ^ keystream[j]; }
-      for (let j = 15; j >= 12; j--) {
-        counter[j]++;
-        if (counter[j] !== 0) break;
-      }
+  decrypt(iv, ct) {
+    const ctr = new Uint8Array(16); ctr.set(iv); ctr[15] = 2;
+    const pt = new Uint8Array(ct.length);
+    for (let i=0; i<ct.length; i+=16) {
+      const ks = this._encBlock(ctr);
+      for (let j=0; j<16 && (i+j)<ct.length; j++) pt[i+j] = ct[i+j] ^ ks[j];
+      for (let j=15; j>=12; j--) { ctr[j]++; if (ctr[j]!==0) break; }
     }
-    return utf8BytesToString(plaintext);
+    return utf8BytesToString(pt);
   }
 }
 
 // ==============================================
-// KEY SELECTION LOGIC (baseada na versão)
+// KEY RECONSTRUCTION
 // ==============================================
 
 function buildVersionMap() {
-    const map = {};
-    for (let n = 1; n <= 30; n += 1) {
-        const i = n ^ 0;
-        const a = 31 - n ^ 0;
-        map[String(n)] = [i, a];
-    }
-    return map;
-}
-
-function getIndicesForVersion(version, arrayLength) {
-    const map = buildVersionMap();
-    const indices = map[String(version)];
-    if (!indices || !Array.isArray(indices)) return [];
-    
-    const validIndices = [];
-    for (const idx of indices) {
-        if (idx >= 1 && idx <= arrayLength) {
-            validIndices.push(idx - 1);
-        }
-    }
-    return validIndices;
-}
-
-function selectKeyParts(payload) {
-    const keyParts = Array.isArray(payload.key_parts) ? payload.key_parts : [];
-    const indices = getIndicesForVersion(payload.version, keyParts.length);
-    
-    if (indices.length === 0) {
-        return keyParts.slice(0, 2);
-    }
-    
-    const selected = indices.map(i => keyParts[i]).filter(p => p && p.length > 0);
-    return selected.length > 0 ? selected : keyParts.slice(0, 2);
+  const map = {};
+  for (let n = 1; n <= 30; n++) map[String(n)] = [n ^ 0, 31 - n ^ 0];
+  return map;
 }
 
 function reconstructKey(payload) {
-    const selected = selectKeyParts(payload);
-    const decoded = selected.map(p => base64ToBytes(p));
-    const total = decoded.reduce((acc, arr) => acc + arr.length, 0);
-    const out = new Uint8Array(total);
-    let offset = 0;
-    for (const arr of decoded) {
-        out.set(arr, offset);
-        offset += arr.length;
-    }
-    if (out.length > 32) return out.slice(0, 32);
-    return out;
+  const keyParts = payload.key_parts || [];
+  const map = buildVersionMap();
+  const indices = map[String(payload.version)] || [];
+  const selected = indices.map(i => keyParts[i-1]).filter(p => p);
+  const parts = selected.length > 0 ? selected : keyParts.slice(0, 2);
+  
+  const decoded = parts.map(p => base64ToBytes(p));
+  const total = decoded.reduce((a, b) => a + b.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const arr of decoded) { out.set(arr, off); off += arr.length; }
+  return out.slice(0, 32);
 }
-
-// ==============================================
-// FUNÇÃO DE DESCRIPTOGRAFIA
-// ==============================================
 
 function decryptPlayback(playback) {
   try {
     const key = reconstructKey(playback);
     const iv = base64ToBytes(playback.iv);
-    const encryptedData = base64ToBytes(playback.payload);
-    const ciphertext = encryptedData.slice(0, -16);
-    const cipher = new AES256GCM_Manual(key);
-    const decrypted = cipher.decrypt(iv, ciphertext);
-    const videoData = JSON.parse(decrypted);
-    
-    let m3u8Url = videoData.url || 
-                  (videoData.sources && videoData.sources[0] && videoData.sources[0].url) || 
-                  (videoData.data && videoData.data.sources && videoData.data.sources[0].url);
-    
-    if (m3u8Url) return { success: true, url: m3u8Url.replace(/\\u0026/g, '&') };
-    return { success: false, error: "URL não encontrada" };
-  } catch (e) { 
-    return { success: false, error: e.message }; 
-  }
+    const data = base64ToBytes(playback.payload);
+    const ct = data.slice(0, -16);
+    const plain = new AES256GCM(key).decrypt(iv, ct);
+    const json = JSON.parse(plain);
+    const url = json.url || json.sources?.[0]?.url || json.data?.sources?.[0]?.url;
+    return url ? { success: true, url: url.replace(/\\u0026/g, '&') } : { success: false };
+  } catch { return { success: false }; }
 }
 
 // ==============================================
-// GERAÇÃO DE FINGERPRINT
+// HELPERS
 // ==============================================
-
-function generateRandomId(length) {
-  const chars = 'abcdef0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
 
 function generateFingerprint() {
-  const viewerId = generateRandomId(32);
-  const deviceId = generateRandomId(32);
-  const timestamp = Math.floor(Date.now() / 1000);
-  
-  const payload = {
-    viewer_id: viewerId,
-    device_id: deviceId,
-    confidence: 0.93,
-    iat: timestamp,
-    exp: timestamp + 600
-  };
-
-  const token = bytesToBase64(stringToUtf8Bytes(JSON.stringify(payload)));
-
-  return {
-    token: token,
-    viewer_id: viewerId,
-    device_id: deviceId,
-    confidence: 0.93
-  };
+  const rand = (l) => Array.from({length:l}, () => 'abcdef0123456789'[Math.floor(Math.random()*16)]).join('');
+  const ts = Math.floor(Date.now()/1000);
+  const payload = { viewer_id: rand(32), device_id: rand(32), confidence: 0.93, iat: ts, exp: ts+600 };
+  return { token: bytesToBase64(new TextEncoder().encode(JSON.stringify(payload))), ...payload };
 }
 
-// ==============================================
-// FUNÇÕES AUXILIARES
-// ==============================================
-
-function isImdbId(id) {
-  return typeof id === "string" && id.toLowerCase().startsWith("tt");
-}
-
-async function convertImdbToTmdb(imdbId, mediaType) {
+async function convertImdbToTmdb(id, type) {
   try {
-    const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-    const response = await fetch(url, { headers: { "User-Agent": USER_AGENT, "Accept": "application/json" } });
-    if (!response.ok) return { success: false, error: `HTTP ${response.status}` };
-    const data = await response.json();
-    const results = mediaType === "tv" ? (data.tv_results || []) : (data.movie_results || []);
-    if (results && results.length > 0) return { success: true, tmdbId: results[0].id };
-    return { success: false, error: "Nenhum resultado encontrado" };
-  } catch (error) { return { success: false, error: error.message }; }
+    const res = await fetch(`${TMDB_BASE_URL}/find/${id}?api_key=${TMDB_API_KEY}&external_source=imdb_id`, { headers: { "User-Agent": getUA() } });
+    const data = await res.json();
+    return type === "tv" ? data.tv_results?.[0]?.id : data.movie_results?.[0]?.id;
+  } catch { return null; }
 }
 
 // ==============================================
-// FUNÇÃO PRINCIPAL getStreams (SEM HEADERS PERSONALIZADOS)
+// MAIN
 // ==============================================
 
-async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
-  const streams = [];
-  
-  const addDebug = (title, content) => {
-    let debugContent = typeof content === 'object' ? JSON.stringify(content, null, 2) : String(content);
-    if (debugContent.length > 500) debugContent = debugContent.substring(0, 500) + '...';
-    streams.push({
-      name: "Pomfy [DEBUG]",
-      title: title,
-      url: debugContent,
-      quality: 0,
-      headers: {}
-    });
-  };
-
-  addDebug(`🔍 INICIANDO BUSCA`, `${mediaType} ${tmdbId}`);
-  
-  let finalTmdbId = tmdbId;
-
-  if (isImdbId(tmdbId)) {
-    addDebug(`📽️ CONVERTENDO IMDb → TMDb`, tmdbId);
-    const conversion = await convertImdbToTmdb(tmdbId, mediaType);
-    if (conversion.success) {
-      finalTmdbId = conversion.tmdbId;
-      addDebug(`✅ IMDb CONVERTIDO`, `TMDb ID: ${finalTmdbId}`);
-    } else {
-      addDebug(`❌ FALHA NA CONVERSÃO IMDb`, conversion.error);
-      return streams;
-    }
-  }
-
-  const seasonNum = mediaType === "movie" ? 1 : (season || 1);
-  const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
-  addDebug(`📺 PARÂMETROS FINAIS`, `Tipo: ${mediaType}, Season: ${seasonNum}, Episode: ${episodeNum}`);
-
+async function getStreams(tmdbId, mediaType = "movie", season = 1, episode = 1) {
   try {
-    // 1. Buscar HTML para obter statusToken
-    const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${finalTmdbId}` : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
-    addDebug(`📡 [1/6] REQUISIÇÃO API`, pomfyUrl);
-    
-    const response = await fetch(pomfyUrl, { headers: HEADERS });
-    if (!response.ok) {
-      addDebug(`❌ [1/6] FALHA HTTP`, `Status: ${response.status}`);
-      return streams;
+    let id = tmdbId;
+    if (String(tmdbId).toLowerCase().startsWith("tt")) {
+      const converted = await convertImdbToTmdb(tmdbId, mediaType);
+      if (!converted) return [];
+      id = converted;
     }
-    
-    const html = await response.text();
-    addDebug(`📄 [1/6] HTML RECEBIDO`, `${html.length} bytes`);
 
-    // Extrair statusToken
-    let statusToken = null;
-    const statusPatterns = [
-      /const statusToken="([^"]+)"/,
-      /statusToken["']?\s*[:=]\s*["']([^"']+)["']/,
-      /["']statusToken["']\s*:\s*["']([^"']+)["']/
-    ];
-    
-    for (const pattern of statusPatterns) {
-      const match = html.match(pattern);
-      if (match && match[1]) {
-        statusToken = match[1];
-        break;
-      }
-    }
-    
-    if (!statusToken) {
-      addDebug(`❌ [2/6] STATUS_TOKEN NÃO ENCONTRADO`, `Patterns testados: ${statusPatterns.length}`);
-      return streams;
-    }
-    
-    addDebug(`✅ [2/6] STATUS_TOKEN OBTIDO`, statusToken.substring(0, 50) + '...');
+    const s = mediaType === "movie" ? 1 : season;
+    const e = mediaType === "movie" ? 1 : episode;
+    const baseUrl = mediaType === "movie" ? `${API_POMFY}/filme/${id}` : `${API_POMFY}/serie/${id}/${s}/${e}`;
 
-    // 2. Pegar byseUrl via /api/play-token
-    const playTokenUrl = `${API_POMFY}/api/play-token?t=${statusToken}`;
-    addDebug(`📡 [3/6] PLAY-TOKEN URL`, playTokenUrl);
-    
-    const playTokenResponse = await fetch(playTokenUrl, {
-      headers: {
-        "accept": "*/*",
-        "cookie": COOKIE,
-        "referer": pomfyUrl,
-        "user-agent": USER_AGENT
-      }
+    // 1. Get HTML & Token
+    const htmlRes = await fetch(baseUrl, { headers: getHeaders(baseUrl) });
+    if (!htmlRes.ok) return [];
+    const html = await htmlRes.text();
+    const tokenMatch = html.match(/const statusToken="([^"]+)"/) || html.match(/statusToken["']?\s*[:=]\s*["']([^"']+)["']/);
+    if (!tokenMatch) return [];
+    const token = tokenMatch[1];
+
+    // 2. Play Token
+    const ptRes = await fetch(`${API_POMFY}/api/play-token?t=${token}`, {
+      headers: { "accept": "*/*", "cookie": COOKIE, "referer": baseUrl, "user-agent": getUA() }
     });
-    
-    if (!playTokenResponse.ok) {
-      addDebug(`❌ [3/6] PLAY-TOKEN FALHOU`, `HTTP ${playTokenResponse.status}`);
-      return streams;
-    }
-    
-    const playTokenData = await playTokenResponse.json();
-    const byseUrl = playTokenData.byseUrl;
-    if (!byseUrl) {
-      addDebug(`❌ [3/6] BYSE_URL NÃO ENCONTRADO`, `Resposta: ${JSON.stringify(playTokenData)}`);
-      return streams;
-    }
-    
-    const byseId = byseUrl.split('/').pop();
-    addDebug(`✅ [3/6] BYSE_ID OBTIDO`, byseId);
+    if (!ptRes.ok) return [];
+    const ptData = await ptRes.json();
+    if (!ptData.byseUrl) return [];
+    const byseId = ptData.byseUrl.split('/').pop();
 
     // 3. Embed Details
-    const detailsUrl = `https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`;
-    addDebug(`📡 [4/6] BUSCANDO DETALHES`, detailsUrl);
-    
-    const detailsRes = await fetch(detailsUrl, {
-      headers: { "referer": byseUrl, "x-embed-origin": "api.pomfy.stream", "user-agent": USER_AGENT }
+    const detRes = await fetch(`https://pomfy-cdn.shop/api/videos/${byseId}/embed/details`, {
+      headers: { "referer": ptData.byseUrl, "x-embed-origin": "api.pomfy.stream", "user-agent": getUA() }
     });
-    
-    if (!detailsRes.ok) {
-      addDebug(`❌ [4/6] DETAILS FALHOU`, `HTTP ${detailsRes.status}`);
-      return streams;
-    }
-    
-    const detailsData = await detailsRes.json();
-    const embedUrl = detailsData.embed_frame_url;
-    if (!embedUrl) {
-      addDebug(`❌ [4/6] EMBED_FRAME_URL NÃO ENCONTRADO`, JSON.stringify(detailsData));
-      return streams;
-    }
-    
-    const playerDomain = new URL(embedUrl).origin;
-    addDebug(`✅ [4/6] PLAYER DOMAIN`, playerDomain);
+    if (!detRes.ok) return [];
+    const detData = await detRes.json();
+    if (!detData.embed_frame_url) return [];
+    const pDomain = new URL(detData.embed_frame_url).origin;
 
-    // 4. Challenge
+    // 4. Challenge (Optional but good for health)
     try {
-      const challengeUrl = `${playerDomain}/api/videos/access/challenge`;
-      addDebug(`🔐 [5/6] CHALLENGE`, challengeUrl);
-      
-      const challengeRes = await fetch(challengeUrl, {
+      await fetch(`${pDomain}/api/videos/access/challenge`, {
         method: 'POST',
-        headers: { 'accept': '*/*', 'origin': playerDomain, 'referer': embedUrl, 'user-agent': USER_AGENT }
+        headers: { 'accept': '*/*', 'origin': pDomain, 'referer': detData.embed_frame_url, 'user-agent': getUA() }
       });
-      
-      if (challengeRes.ok) {
-        addDebug(`✅ [5/6] CHALLENGE OK`, `HTTP ${challengeRes.status}`);
-      } else {
-        addDebug(`⚠️ [5/6] CHALLENGE IGNORADO`, `HTTP ${challengeRes.status}`);
-      }
-    } catch (e) {
-      addDebug(`⚠️ [5/6] CHALLENGE ERRO`, e.message);
-    }
+    } catch {}
 
     // 5. Playback
-    const fingerprint = generateFingerprint();
-    addDebug(`🔐 [6/6] FINGERPRINT GERADO`, `viewer_id: ${fingerprint.viewer_id}`);
-
-    const playbackUrl = `${playerDomain}/api/videos/${byseId}/embed/playback`;
-    addDebug(`📡 [6/6] PLAYBACK URL`, playbackUrl);
-    
-    const playbackRes = await fetch(playbackUrl, {
+    const fp = generateFingerprint();
+    const pbRes = await fetch(`${pDomain}/api/videos/${byseId}/embed/playback`, {
       method: "POST",
       headers: { 
-        "content-type": "application/json", 
-        "origin": playerDomain, 
-        "referer": embedUrl, 
-        "user-agent": USER_AGENT,
-        "x-embed-origin": "api.pomfy.stream",
-        "x-embed-parent": byseUrl
+        "content-type": "application/json", "origin": pDomain, 
+        "referer": detData.embed_frame_url, "user-agent": getUA(),
+        "x-embed-origin": "api.pomfy.stream", "x-embed-parent": ptData.byseUrl
       },
-      body: JSON.stringify({ fingerprint: fingerprint })
+      body: JSON.stringify({ fingerprint: fp })
     });
-    
-    if (!playbackRes.ok) {
-      addDebug(`❌ [6/6] PLAYBACK FALHOU`, `HTTP ${playbackRes.status}`);
-      return streams;
-    }
-    
-    const playbackData = await playbackRes.json();
-    if (!playbackData.playback) {
-      addDebug(`❌ [6/6] SEM PLAYBACK NA RESPOSTA`, JSON.stringify(playbackData));
-      return streams;
-    }
-    
-    addDebug(`🔓 DESCRIPTOGRAFANDO`, `Versão: ${playbackData.playback.version}`);
-    const decryptResult = decryptPlayback(playbackData.playback);
-    
-    if (decryptResult.success) {
-      addDebug(`✅ SUCESSO! URL OBTIDA`, decryptResult.url.substring(0, 100) + '...');
-      
-      // Remove todos os streams de debug
-      streams.length = 0;
-      
-      // SEM HEADERS PERSONALIZADOS - Igual ao código do amigo
-      // Deixa o Nuvio gerenciar os headers automaticamente
-      streams.push({
+    if (!pbRes.ok) return [];
+    const pbData = await pbRes.json();
+    if (!pbData.playback) return [];
+
+    const dec = decryptPlayback(pbData.playback);
+    if (dec.success) {
+      return [{
         name: "Pomfy",
         title: "1080p",
-        url: decryptResult.url,
+        url: dec.url,
         quality: 1080,
         type: "hls"
-        // SEM HEADERS!
-      });
-      
-      return streams;
-    } else {
-      addDebug(`❌ DESCRIPTOGRAFIA FALHOU`, decryptResult.error);
-      return streams;
+      }];
     }
-
-  } catch (e) { 
-    addDebug(`❌ ERRO CRÍTICO`, `${e.message}\n${e.stack || ''}`);
-    return streams;
+    return [];
+  } catch {
+    return [];
   }
 }
 
