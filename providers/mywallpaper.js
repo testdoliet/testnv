@@ -77,7 +77,6 @@ async function isAnime(tmdbId, mediaType) {
             origin.indexOf('JP') !== -1 ||
             origin.indexOf('JA') !== -1;
 
-        // Também verifica keywords para "anime"
         if (mediaType === 'tv' && isJapanese) {
             const kwUrl = `${TMDB_BASE_URL}/tv/${tmdbId}/keywords?api_key=${TMDB_API_KEY}`;
             const kwResponse = await fetch(kwUrl, { redirect: 'follow' });
@@ -107,13 +106,14 @@ async function getTMDBEpisodeDate(tmdbId, season, episode) {
     }
 }
 
-async function getTMDBTitle(tmdbId) {
-    const url = TMDB_BASE_URL + '/tv/' + tmdbId + '?api_key=' + TMDB_API_KEY + '&language=en-US';
+async function getTMDBTitle(tmdbId, mediaType) {
+    const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
+    const url = TMDB_BASE_URL + '/' + endpoint + '/' + tmdbId + '?api_key=' + TMDB_API_KEY + '&language=en-US';
     try {
         const response = await fetch(url, { redirect: 'follow' });
         if (!response.ok) return null;
         const data = await response.json();
-        return data.name;
+        return mediaType === 'tv' ? data.name : data.title;
     } catch {
         return null;
     }
@@ -355,7 +355,7 @@ function analyzeParts(seasons, targetEpisode, episodeDate) {
         let base = s.title
             .replace(/[:\s]*(?:Part|Parte)\s*\d+$/i, '')
             .replace(/\s+\d+$/, '')
-            .replace(/[:\s]*(?:Season|Cour)\s*\d+$/, '')
+            .replace(/[:\s]*(?:Season|Cour)\s*\d+$/i, '')
             .trim();
 
         if (base.length < 3) base = s.title;
@@ -539,28 +539,35 @@ function calculateContinuousEpisode(seasons, targetSeason, targetEpisode) {
     return null;
 }
 
-// ==================== HELPER DE LOGS ====================
+// ==================== HELPERS DE STREAM ====================
 
-function createDebugStream(title, content) {
+function buildStreamObject(url, name, title, quality, bingeGroup) {
+    const qMatch = url.match(/(1080|720|480|360)p?/i);
+    const parsedQuality = qMatch ? parseInt(qMatch[1]) : (quality || 1080);
+
     return {
-        url: typeof content === 'object' ? JSON.stringify(content) : String(content),
-        name: 'My Wallpaper [DEBUG]',
+        url: url,
+        name: name,
         title: title,
-        quality: 0,
-        type: 'debug'
+        quality: parsedQuality,
+        type: 'hls',
+        behaviorHints: {
+            notWebReady: true,
+            bingeGroup: bingeGroup
+        },
+        headers: {
+            'User-Agent': 'Mozilla/5.0',
+            'Accept': 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
+            'Accept-Language': 'pt-BR,pt;q=0.9',
+            'Origin': CDN_BASE,
+            'Referer': CDN_BASE + '/'
+        }
     };
 }
 
 // ==================== FUNÇÃO PRINCIPAL ====================
 
 async function getStreams(tmdbId, mediaType, season, episode) {
-    const debugs = [];
-    const addDebug = (title, content) => {
-        debugs.push(createDebugStream(title, content));
-    };
-
-    addDebug("🎬 INÍCIO", `ID: ${tmdbId} | ${mediaType} | S${season}E${episode}`);
-
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     const epPadded = targetEpisode.toString().padStart(2, '0');
@@ -570,29 +577,108 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
 
     if (isImdb) {
-        addDebug("🔄 CONVERTENDO IMDb", tmdbId);
         const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
         if (convertedId) {
             finalId = convertedId;
-            addDebug("✅ IMDb CONVERTIDO", `TMDB ID: ${finalId}`);
         } else {
-            addDebug("❌ FALHA IMDb", "Não foi possível converter");
-            return debugs;
+            return [];
         }
     }
 
     // Verificação se é anime
-    addDebug("🔍 VERIFICANDO SE É ANIME", `TMDB ID: ${finalId}`);
     const animeCheck = await isAnime(finalId, mediaType);
-    addDebug("📊 RESULTADO ANIME", animeCheck ? "É anime" : "NÃO é anime (continuando mesmo assim)");
 
     try {
         let validStreams = [];
-        const seenStreamUrls = {}; // DEDUP: não testa a mesma URL 2x
+        const seenStreamUrls = {};
 
-        addDebug("📡 BUSCANDO TÍTULOS ANILIST", `TMDB ID: ${finalId}`);
+        // ==================== FILMES ====================
+        if (mediaType === 'movie') {
+            const titles = await getAniListTitles(finalId, mediaType);
+
+            if (titles?.length > 0) {
+                for (const titleInfo of titles) {
+                    if (titleInfo.type !== 'romaji' && titleInfo.type !== 'english') continue;
+
+                    const slug = titleToSlug(titleInfo.name);
+                    const firstLetter = slug.charAt(0) || 't';
+
+                    // URL de filme: /stream/<letra>/<slug>/filme.mp4/index.m3u8
+                    const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/filme.mp4/index.m3u8`;
+                    const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/filme.mp4/index.m3u8`;
+
+                    if (!seenStreamUrls[legUrl]) {
+                        seenStreamUrls[legUrl] = true;
+                        if (await testUrl(legUrl)) {
+                            validStreams.push(buildStreamObject(
+                                legUrl,
+                                'My Wallpaper Legendado',
+                                titleInfo.name,
+                                1080,
+                                'mywallpaper-' + slug
+                            ));
+                        }
+                    }
+
+                    if (!seenStreamUrls[dubUrl]) {
+                        seenStreamUrls[dubUrl] = true;
+                        if (await testUrl(dubUrl)) {
+                            validStreams.push(buildStreamObject(
+                                dubUrl,
+                                'My Wallpaper Dublado',
+                                titleInfo.name,
+                                1080,
+                                'mywallpaper-' + slug
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // Fallback: tenta com título TMDB
+            if (validStreams.length === 0) {
+                const movieTitle = await getTMDBTitle(finalId, mediaType);
+                if (movieTitle) {
+                    const slug = titleToSlug(movieTitle);
+                    const firstLetter = slug.charAt(0) || 't';
+
+                    const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/filme.mp4/index.m3u8`;
+                    const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/filme.mp4/index.m3u8`;
+
+                    if (!seenStreamUrls[legUrl]) {
+                        seenStreamUrls[legUrl] = true;
+                        if (await testUrl(legUrl)) {
+                            validStreams.push(buildStreamObject(
+                                legUrl,
+                                'My Wallpaper Legendado',
+                                movieTitle,
+                                1080,
+                                'mywallpaper-' + slug
+                            ));
+                        }
+                    }
+
+                    if (!seenStreamUrls[dubUrl]) {
+                        seenStreamUrls[dubUrl] = true;
+                        if (await testUrl(dubUrl)) {
+                            validStreams.push(buildStreamObject(
+                                dubUrl,
+                                'My Wallpaper Dublado',
+                                movieTitle,
+                                1080,
+                                'mywallpaper-' + slug
+                            ));
+                        }
+                    }
+                }
+            }
+
+            validStreams.sort((a, b) => b.quality - a.quality);
+            return validStreams;
+        }
+
+        // ==================== SÉRIES (TV) ====================
         const titles = await getAniListTitles(finalId, mediaType);
-        addDebug("📋 TÍTULOS ENCONTRADOS", `${titles?.length || 0} títulos`);
 
         if (titles?.length > 0) {
             const streamMap = {};
@@ -601,7 +687,6 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 if (titleInfo.type !== 'romaji' && titleInfo.type !== 'english') continue;
 
                 const slugVariations = generateSlugVariations(titleInfo.name, targetSeason);
-                addDebug(`🔤 SLUGS [${titleInfo.type}]`, `${titleInfo.name}: ${slugVariations.length} variações`);
 
                 for (const slug of slugVariations) {
                     const firstLetter = slug.charAt(0) || 't';
@@ -612,7 +697,6 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                     const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/${epPadded}.mp4/index.m3u8`;
                     const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${epPadded}.mp4/index.m3u8`;
 
-                    // DEDUP: só adiciona se URL ainda não vista
                     if (!seenStreamUrls[legUrl]) {
                         seenStreamUrls[legUrl] = true;
                         streamMap[key].push({
@@ -634,14 +718,9 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }
 
             const allUrls = Object.values(streamMap).flat();
-            addDebug("🔗 URLS PARA TESTAR", `${allUrls.length} combinações`);
 
             for (const item of allUrls) {
-                addDebug("📡 TESTANDO", item.url);
-
                 if (await testUrl(item.url)) {
-                    addDebug("✅ ENCONTRADO", item.url);
-
                     let originalTitle = '';
                     for (const key in streamMap) {
                         const found = streamMap[key].find(u => u.url === item.url);
@@ -651,46 +730,26 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                         }
                     }
 
-                    // Parse qualidade da URL
-                    const qMatch = item.url.match(/(1080|720|480|360)p?/i);
-                    const quality = qMatch ? qMatch[1] + 'p' : '1080p';
-
-                    validStreams.push({
-                        url: item.url,
-                        name: `My Wallpaper ${item.type === 'dub' ? 'Dublado' : 'Legendado'} ${quality}`,
-                        title: `${originalTitle} S${targetSeason} EP${targetEpisode}`,
-                        quality: parseInt(quality) || 1080,
-                        type: 'hls',
-                        behaviorHints: {
-                            notWebReady: true,
-                            bingeGroup: 'mywallpaper-' + titleToSlug(originalTitle)
-                        },
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0',
-                            'Accept': 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-                            'Accept-Language': 'pt-BR,pt;q=0.9',
-                            'Origin': CDN_BASE,
-                            'Referer': CDN_BASE + '/'
-                        }
-                    });
+                    validStreams.push(buildStreamObject(
+                        item.url,
+                        item.type === 'dub' ? 'My Wallpaper Dublado' : 'My Wallpaper Legendado',
+                        `${originalTitle} S${targetSeason} EP${targetEpisode}`,
+                        1080,
+                        'mywallpaper-' + titleToSlug(originalTitle)
+                    ));
                 }
             }
         }
 
         if (validStreams.length === 0) {
-            addDebug("⚠️ FASE 2", "Buscando por episódio absoluto...");
-
             const seasonsInfo = await getTMDBSeasonsInfo(finalId);
-            addDebug("📊 TEMPORADAS TMDB", seasonsInfo ? `${seasonsInfo.length} temporadas` : "Nenhuma");
 
             if (seasonsInfo?.length) {
                 const absoluteEpisode = calculateAbsoluteEpisode(seasonsInfo, targetSeason, targetEpisode);
-                addDebug("🔢 EPISÓDIO ABSOLUTO", absoluteEpisode || "Não calculado");
 
                 if (absoluteEpisode) {
                     const absEpPadded = absoluteEpisode.toString().padStart(2, '0');
-                    const animeTitle = await getTMDBTitle(finalId);
-                    addDebug("📺 TÍTULO TMDB", animeTitle || "Não encontrado");
+                    const animeTitle = await getTMDBTitle(finalId, mediaType);
 
                     if (animeTitle) {
                         const baseSlug = titleToSlug(animeTitle);
@@ -705,67 +764,32 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                         }
 
                         const uniqueSlugs = [...new Set(absoluteSlugs)];
-                        addDebug("🔤 SLUGS ABSOLUTOS", `${uniqueSlugs.length} variações`);
 
                         for (const slug of uniqueSlugs) {
                             const firstLetter = slug.charAt(0) || 't';
 
                             const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/${absEpPadded}.mp4/index.m3u8`;
-                            addDebug("📡 TESTANDO", legUrl);
                             if (!seenStreamUrls[legUrl] && await testUrl(legUrl)) {
                                 seenStreamUrls[legUrl] = true;
-                                addDebug("✅ ENCONTRADO", legUrl);
-
-                                const qMatch = legUrl.match(/(1080|720|480|360)p?/i);
-                                const quality = qMatch ? qMatch[1] + 'p' : '1080p';
-
-                                validStreams.push({
-                                    url: legUrl,
-                                    name: `My Wallpaper Legendado ${quality}`,
-                                    title: `${animeTitle} EP${absoluteEpisode}`,
-                                    quality: parseInt(quality) || 1080,
-                                    type: 'hls',
-                                    behaviorHints: {
-                                        notWebReady: true,
-                                        bingeGroup: 'mywallpaper-' + baseSlug
-                                    },
-                                    headers: {
-                                        'User-Agent': 'Mozilla/5.0',
-                                        'Accept': 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-                                        'Accept-Language': 'pt-BR,pt;q=0.9',
-                                        'Origin': CDN_BASE,
-                                        'Referer': CDN_BASE + '/'
-                                    }
-                                });
+                                validStreams.push(buildStreamObject(
+                                    legUrl,
+                                    'My Wallpaper Legendado',
+                                    `${animeTitle} EP${absoluteEpisode}`,
+                                    1080,
+                                    'mywallpaper-' + baseSlug
+                                ));
                             }
 
                             const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${absEpPadded}.mp4/index.m3u8`;
-                            addDebug("📡 TESTANDO", dubUrl);
                             if (!seenStreamUrls[dubUrl] && await testUrl(dubUrl)) {
                                 seenStreamUrls[dubUrl] = true;
-                                addDebug("✅ ENCONTRADO", dubUrl);
-
-                                const qMatch = dubUrl.match(/(1080|720|480|360)p?/i);
-                                const quality = qMatch ? qMatch[1] + 'p' : '1080p';
-
-                                validStreams.push({
-                                    url: dubUrl,
-                                    name: `My Wallpaper Dublado ${quality}`,
-                                    title: `${animeTitle} EP${absoluteEpisode}`,
-                                    quality: parseInt(quality) || 1080,
-                                    type: 'hls',
-                                    behaviorHints: {
-                                        notWebReady: true,
-                                        bingeGroup: 'mywallpaper-' + baseSlug
-                                    },
-                                    headers: {
-                                        'User-Agent': 'Mozilla/5.0',
-                                        'Accept': 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-                                        'Accept-Language': 'pt-BR,pt;q=0.9',
-                                        'Origin': CDN_BASE,
-                                        'Referer': CDN_BASE + '/'
-                                    }
-                                });
+                                validStreams.push(buildStreamObject(
+                                    dubUrl,
+                                    'My Wallpaper Dublado',
+                                    `${animeTitle} EP${absoluteEpisode}`,
+                                    1080,
+                                    'mywallpaper-' + baseSlug
+                                ));
                             }
                         }
                     }
@@ -774,92 +798,50 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         }
 
         if (validStreams.length === 0) {
-            addDebug("⚠️ FASE 3", "Buscando por data do episódio + AniList...");
-
             const episodeDate = await getTMDBEpisodeDate(finalId, targetSeason, targetEpisode);
-            addDebug("📅 DATA DO EPISÓDIO", episodeDate ? new Date(episodeDate).toISOString() : "Não encontrada");
 
             if (episodeDate) {
-                const animeTitle = await getTMDBTitle(finalId);
-                addDebug("📺 TÍTULO TMDB", animeTitle || "Não encontrado");
+                const animeTitle = await getTMDBTitle(finalId, mediaType);
 
                 if (animeTitle) {
                     const anilistId = await searchAnilistId(animeTitle);
-                    addDebug("🔗 ANILIST ID", anilistId || "Não encontrado");
 
                     if (anilistId) {
                         const allSeasons = await getAllSeasons(anilistId);
-                        addDebug("📊 TEMPORADAS ANILIST", `${allSeasons.length} temporadas`);
 
                         if (allSeasons.length) {
                             const seasonInfo = analyzeParts(allSeasons, targetEpisode, episodeDate);
-                            addDebug("✅ MATCH ANILIST", seasonInfo ? `Parte ${seasonInfo.partNumber}, Ep ${seasonInfo.episodeInPart}` : "Nenhum match");
 
                             if (seasonInfo) {
                                 const slugs = generateMinimalSlugs(seasonInfo, targetSeason);
                                 const testEpisode = seasonInfo.episodeInPart || targetEpisode;
                                 const testEpPadded = testEpisode.toString().padStart(2, '0');
-                                addDebug("🔤 SLUGS MINIMOS", `${slugs.length} variações`);
 
                                 for (const slug of slugs) {
                                     const firstLetter = slug.charAt(0) || 't';
 
                                     const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/${testEpPadded}.mp4/index.m3u8`;
-                                    addDebug("📡 TESTANDO", legUrl);
                                     if (!seenStreamUrls[legUrl] && await testUrl(legUrl)) {
                                         seenStreamUrls[legUrl] = true;
-                                        addDebug("✅ ENCONTRADO", legUrl);
-
-                                        const qMatch = legUrl.match(/(1080|720|480|360)p?/i);
-                                        const quality = qMatch ? qMatch[1] + 'p' : '1080p';
-
-                                        validStreams.push({
-                                            url: legUrl,
-                                            name: `My Wallpaper Legendado ${quality}`,
-                                            title: `${seasonInfo.baseTitle} S${targetSeason} EP${targetEpisode}${seasonInfo.hasMultipleParts ? ` (Parte ${seasonInfo.partNumber})` : ''}`,
-                                            quality: parseInt(quality) || 1080,
-                                            type: 'hls',
-                                            behaviorHints: {
-                                                notWebReady: true,
-                                                bingeGroup: 'mywallpaper-' + titleToSlug(seasonInfo.baseTitle)
-                                            },
-                                            headers: {
-                                                'User-Agent': 'Mozilla/5.0',
-                                                'Accept': 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-                                                'Accept-Language': 'pt-BR,pt;q=0.9',
-                                                'Origin': CDN_BASE,
-                                                'Referer': CDN_BASE + '/'
-                                            }
-                                        });
+                                        validStreams.push(buildStreamObject(
+                                            legUrl,
+                                            'My Wallpaper Legendado',
+                                            `${seasonInfo.baseTitle} S${targetSeason} EP${targetEpisode}${seasonInfo.hasMultipleParts ? ` (Parte ${seasonInfo.partNumber})` : ''}`,
+                                            1080,
+                                            'mywallpaper-' + titleToSlug(seasonInfo.baseTitle)
+                                        ));
                                     }
 
                                     const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${testEpPadded}.mp4/index.m3u8`;
-                                    addDebug("📡 TESTANDO", dubUrl);
                                     if (!seenStreamUrls[dubUrl] && await testUrl(dubUrl)) {
                                         seenStreamUrls[dubUrl] = true;
-                                        addDebug("✅ ENCONTRADO", dubUrl);
-
-                                        const qMatch = dubUrl.match(/(1080|720|480|360)p?/i);
-                                        const quality = qMatch ? qMatch[1] + 'p' : '1080p';
-
-                                        validStreams.push({
-                                            url: dubUrl,
-                                            name: `My Wallpaper Dublado ${quality}`,
-                                            title: `${seasonInfo.baseTitle} S${targetSeason} EP${targetEpisode}${seasonInfo.hasMultipleParts ? ` (Parte ${seasonInfo.partNumber})` : ''}`,
-                                            quality: parseInt(quality) || 1080,
-                                            type: 'hls',
-                                            behaviorHints: {
-                                                notWebReady: true,
-                                                bingeGroup: 'mywallpaper-' + titleToSlug(seasonInfo.baseTitle)
-                                            },
-                                            headers: {
-                                                'User-Agent': 'Mozilla/5.0',
-                                                'Accept': 'application/vnd.apple.mpegurl,application/x-mpegURL,*/*',
-                                                'Accept-Language': 'pt-BR,pt;q=0.9',
-                                                'Origin': CDN_BASE,
-                                                'Referer': CDN_BASE + '/'
-                                            }
-                                        });
+                                        validStreams.push(buildStreamObject(
+                                            dubUrl,
+                                            'My Wallpaper Dublado',
+                                            `${seasonInfo.baseTitle} S${targetSeason} EP${targetEpisode}${seasonInfo.hasMultipleParts ? ` (Parte ${seasonInfo.partNumber})` : ''}`,
+                                            1080,
+                                            'mywallpaper-' + titleToSlug(seasonInfo.baseTitle)
+                                        ));
                                     }
                                 }
                             }
@@ -870,18 +852,10 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         }
 
         validStreams.sort((a, b) => b.quality - a.quality);
-
-        if (validStreams.length === 0) {
-            addDebug("❌ FIM", "Nenhum stream encontrado");
-            return debugs;
-        }
-
-        addDebug("✅ FIM", `${validStreams.length} streams encontrados`);
-        return [...validStreams, ...debugs];
+        return validStreams;
 
     } catch (error) {
-        addDebug("❌ ERRO", error.message || String(error));
-        return debugs;
+        return [];
     }
 }
 
