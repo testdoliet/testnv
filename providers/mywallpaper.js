@@ -2,12 +2,30 @@ const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const CDN_BASE = 'https://cdn-s01.mywallpaper-4k-image.net';
 
+// ==================== NORMALIZAÇÃO AGRESSIVA (COM ARTIGOS) ====================
+
 function titleToSlug(title) {
     if (!title) return '';
-    return title.toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '');
+    
+    // 1. Normalização Unicode (remove acentos: á -> a, ã -> a, etc)
+    let slug = title.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // 2. Remover conteúdo entre parênteses ou colchetes (ex: "(2024)", "[Dublado]")
+    // Isso ajuda a limpar títulos como "Attack on Titan (Movie)" -> "Attack on Titan"
+    slug = slug.replace(/\s*$.*?$\s*/g, ' ')
+               .replace(/\s*$$.*?$$\s*/g, ' ');
+
+    // 3. Substituir caracteres não alfanuméricos por hífen, mantendo espaços para agora
+    slug = slug.replace(/[^a-z0-9\s-]/g, ' ');
+
+    // 4. Colapsar múltiplos espaços e hífens
+    slug = slug.replace(/\s+/g, ' ')
+               .trim()
+               .replace(/\s/g, '-'); // Converte espaços restantes em hífens
+
+    // 5. Remover hífens extras no início/fim
+    return slug.replace(/^-+|-+$/g, '');
 }
 
 async function testUrl(url) {
@@ -545,18 +563,17 @@ function generateMovieSlugVariations(title) {
         }
     };
 
-    // 1. Slug completo
+    // 1. Slug completo (com artigos, normalizado)
     const fullSlug = titleToSlug(title);
     addSlug(fullSlug);
 
-    // 2. Remover subtítulos após dois-pontos ou parênteses
-    // Ex: "Attack on Titan: THE LAST ATTACK" -> "Attack on Titan"
+    // 2. Remover subtítulos após dois-pontos (ex: "Attack on Titan: THE LAST ATTACK" -> "Attack on Titan")
     const baseTitle = title.split(':')[0].split('(')[0].trim();
     if (baseTitle !== title) {
         addSlug(titleToSlug(baseTitle));
     }
 
-    // 3. Remover anos e palavras comuns de filme
+    // 3. Remover anos e palavras comuns de filme (limpeza extra)
     const cleanedTitle = baseTitle
         .replace(/\s*$\d{4}$/g, '') // Remove (2024)
         .replace(/\b(Movie|Film|The Movie|O Filme)\b/gi, '') // Remove "Movie"
@@ -570,6 +587,7 @@ function generateMovieSlugVariations(title) {
     const words = fullSlug.split('-');
     if (words.length > 2) {
         // Tenta combinações menores, ex: attack-on-titan -> attack-on -> attack
+        // Mantemos pelo menos 2 palavras para evitar slugs muito genéricos
         for (let i = words.length - 1; i >= 2; i--) {
             addSlug(words.slice(0, i).join('-'));
         }
@@ -707,7 +725,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
 
     try {
         let validStreams = [];
-        const seenStreamUrls = {};
+        const seenStreamUrls = {}; // DEDUPLICAÇÃO: Controla URLs já testadas/adicionadas
 
         // ==================== FILMES ====================
         if (mediaType === 'movie') {
@@ -730,18 +748,25 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                         const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/01.mp4/index.m3u8`;
                         const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/01.mp4/index.m3u8`;
 
+                        // DEDUPLICAÇÃO: Só testa se ainda não viu essa URL
                         if (!seenStreamUrls[legUrl]) {
                             seenStreamUrls[legUrl] = true;
                             addDebug("📡 TESTANDO LEG", legUrl);
                             if (await testUrl(legUrl)) {
                                 addDebug("✅ ENCONTRADO LEG", legUrl);
-                                validStreams.push(buildStreamObject(
+                                
+                                const streamObj = buildStreamObject(
                                     legUrl,
                                     'My Wallpaper Legendado',
                                     titleInfo.name,
                                     1080,
                                     'mywallpaper-' + slug
-                                ));
+                                );
+                                
+                                // Segurança extra: não adicionar se já existir na lista final
+                                if (!validStreams.some(s => s.url === streamObj.url)) {
+                                    validStreams.push(streamObj);
+                                }
                             } else {
                                 addDebug("❌ FALHA LEG", "404");
                             }
@@ -752,13 +777,18 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                             addDebug("📡 TESTANDO DUB", dubUrl);
                             if (await testUrl(dubUrl)) {
                                 addDebug("✅ ENCONTRADO DUB", dubUrl);
-                                validStreams.push(buildStreamObject(
+                                
+                                const streamObj = buildStreamObject(
                                     dubUrl,
                                     'My Wallpaper Dublado',
                                     titleInfo.name,
                                     1080,
                                     'mywallpaper-' + slug
-                                ));
+                                );
+
+                                if (!validStreams.some(s => s.url === streamObj.url)) {
+                                    validStreams.push(streamObj);
+                                }
                             } else {
                                 addDebug("❌ FALHA DUB", "404");
                             }
@@ -799,6 +829,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                     const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/${epPadded}.mp4/index.m3u8`;
                     const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${epPadded}.mp4/index.m3u8`;
 
+                    // DEDUPLICAÇÃO
                     if (!seenStreamUrls[legUrl]) {
                         seenStreamUrls[legUrl] = true;
                         streamMap[key].push({
@@ -837,13 +868,18 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                         }
                     }
 
-                    validStreams.push(buildStreamObject(
+                    const streamObj = buildStreamObject(
                         item.url,
                         item.type === 'dub' ? 'My Wallpaper Dublado' : 'My Wallpaper Legendado',
                         `${originalTitle} S${targetSeason} EP${targetEpisode}`,
                         1080,
                         'mywallpaper-' + titleToSlug(originalTitle)
-                    ));
+                    );
+
+                    // DEDUPLICAÇÃO FINAL
+                    if (!validStreams.some(s => s.url === streamObj.url)) {
+                        validStreams.push(streamObj);
+                    }
                 }
             }
         }
@@ -886,13 +922,17 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                             if (!seenStreamUrls[legUrl] && await testUrl(legUrl)) {
                                 seenStreamUrls[legUrl] = true;
                                 addDebug("✅ ENCONTRADO", legUrl);
-                                validStreams.push(buildStreamObject(
+                                
+                                const streamObj = buildStreamObject(
                                     legUrl,
                                     'My Wallpaper Legendado',
                                     `${animeTitle} EP${absoluteEpisode}`,
                                     1080,
                                     'mywallpaper-' + baseSlug
-                                ));
+                                );
+                                if (!validStreams.some(s => s.url === streamObj.url)) {
+                                    validStreams.push(streamObj);
+                                }
                             }
 
                             const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${absEpPadded}.mp4/index.m3u8`;
@@ -900,13 +940,17 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                             if (!seenStreamUrls[dubUrl] && await testUrl(dubUrl)) {
                                 seenStreamUrls[dubUrl] = true;
                                 addDebug("✅ ENCONTRADO", dubUrl);
-                                validStreams.push(buildStreamObject(
+                                
+                                const streamObj = buildStreamObject(
                                     dubUrl,
                                     'My Wallpaper Dublado',
                                     `${animeTitle} EP${absoluteEpisode}`,
                                     1080,
                                     'mywallpaper-' + baseSlug
-                                ));
+                                );
+                                if (!validStreams.some(s => s.url === streamObj.url)) {
+                                    validStreams.push(streamObj);
+                                }
                             }
                         }
                     }
@@ -950,13 +994,17 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                                     if (!seenStreamUrls[legUrl] && await testUrl(legUrl)) {
                                         seenStreamUrls[legUrl] = true;
                                         addDebug("✅ ENCONTRADO", legUrl);
-                                        validStreams.push(buildStreamObject(
+                                        
+                                        const streamObj = buildStreamObject(
                                             legUrl,
                                             'My Wallpaper Legendado',
                                             `${seasonInfo.baseTitle} S${targetSeason} EP${targetEpisode}${seasonInfo.hasMultipleParts ? ` (Parte ${seasonInfo.partNumber})` : ''}`,
                                             1080,
                                             'mywallpaper-' + titleToSlug(seasonInfo.baseTitle)
-                                        ));
+                                        );
+                                        if (!validStreams.some(s => s.url === streamObj.url)) {
+                                            validStreams.push(streamObj);
+                                        }
                                     }
 
                                     const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${testEpPadded}.mp4/index.m3u8`;
@@ -964,13 +1012,17 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                                     if (!seenStreamUrls[dubUrl] && await testUrl(dubUrl)) {
                                         seenStreamUrls[dubUrl] = true;
                                         addDebug("✅ ENCONTRADO", dubUrl);
-                                        validStreams.push(buildStreamObject(
+                                        
+                                        const streamObj = buildStreamObject(
                                             dubUrl,
                                             'My Wallpaper Dublado',
                                             `${seasonInfo.baseTitle} S${targetSeason} EP${targetEpisode}${seasonInfo.hasMultipleParts ? ` (Parte ${seasonInfo.partNumber})` : ''}`,
                                             1080,
                                             'mywallpaper-' + titleToSlug(seasonInfo.baseTitle)
-                                        ));
+                                        );
+                                        if (!validStreams.some(s => s.url === streamObj.url)) {
+                                            validStreams.push(streamObj);
+                                        }
                                     }
                                 }
                             }
