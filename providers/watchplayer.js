@@ -1,15 +1,6 @@
-/**
- * PlayerFlix Provider - WatchPlayer + VIP Player
- * Nomes: Stream 1 (WatchPlayer) e Stream 2 (VIP Player)
- * Com User-Agent rotativo
- */
-
 const TMDB_API_KEY = "3644dd4950b67cd8067b8772de576d6b";
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
-// ==============================================
-// USER-AGENT ROTATIVO
-// ==============================================
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -18,30 +9,23 @@ const USER_AGENTS = [
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 ];
 
-let currentUserAgentIndex = 0;
-
-function getUserAgent() {
-  // Rotaciona entre os User-Agents
-  const ua = USER_AGENTS[currentUserAgentIndex];
-  currentUserAgentIndex = (currentUserAgentIndex + 1) % USER_AGENTS.length;
+let uaIndex = 0;
+const getUA = () => {
+  const ua = USER_AGENTS[uaIndex];
+  uaIndex = (uaIndex + 1) % USER_AGENTS.length;
   return ua;
-}
+};
 
 const getHeaders = (referer, isApi = false) => {
-  const userAgent = getUserAgent();
-  
-  if (isApi) {
-    return {
-      "User-Agent": userAgent,
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      "X-Requested-With": "XMLHttpRequest",
-      "Origin": "https://embedplayer2.xyz",
-      "Referer": referer
-    };
-  }
-  
-  return {
-    "User-Agent": userAgent,
+  const ua = getUA();
+  return isApi ? {
+    "User-Agent": ua,
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "X-Requested-With": "XMLHttpRequest",
+    "Origin": "https://embedplayer2.xyz",
+    "Referer": referer
+  } : {
+    "User-Agent": ua,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "pt-BR,pt;q=0.9",
     "Referer": referer || "https://playerflix.ink/",
@@ -52,217 +36,136 @@ const getHeaders = (referer, isApi = false) => {
 async function convertImdbToTmdb(imdbId, mediaType) {
   try {
     const url = `${TMDB_BASE_URL}/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-    const response = await fetch(url, {
-      headers: { "User-Agent": getUserAgent(), "Accept": "application/json" }
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    if (mediaType === "movie") {
-      if (data.movie_results && data.movie_results.length > 0) return data.movie_results[0].id;
-    } else {
-      if (data.tv_results && data.tv_results.length > 0) return data.tv_results[0].id;
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
+    const res = await fetch(url, { headers: { "User-Agent": getUA(), "Accept": "application/json" } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (mediaType === "movie") return data.movie_results?.[0]?.id || null;
+    return data.tv_results?.[0]?.id || null;
+  } catch { return null; }
 }
 
-async function detectBestQuality(m3u8Url) {
+async function detectQuality(m3u8Url) {
   try {
-    const resp = await fetch(m3u8Url, {
-      headers: { "User-Agent": getUserAgent() }
+    const res = await fetch(m3u8Url, { headers: { "User-Agent": getUA() } });
+    if (!res.ok) return { label: "720p", value: 720 };
+    const text = await res.text();
+    let maxH = 0;
+    text.split('\n').forEach(line => {
+      const m = line.match(/RESOLUTION=\d+x(\d+)/);
+      if (m) maxH = Math.max(maxH, parseInt(m[1]));
     });
-    if (!resp.ok) return { label: "720p", value: 720 };
-    
-    const content = await resp.text();
-    const lines = content.split('\n');
-    
-    let bestHeight = 0;
-    
-    for (const line of lines) {
-      const resolutionMatch = line.match(/RESOLUTION=(\d+)x(\d+)/);
-      if (resolutionMatch) {
-        const height = parseInt(resolutionMatch[2]);
-        if (height > bestHeight) bestHeight = height;
-      }
-    }
-    
-    if (bestHeight >= 1080) return { label: "1080p", value: 1080 };
-    if (bestHeight >= 720) return { label: "720p", value: 720 };
-    if (bestHeight >= 480) return { label: "480p", value: 480 };
-    return { label: "720p", value: 720 };
-  } catch (err) {
-    return { label: "720p", value: 720 };
-  }
+    if (maxH >= 1080) return { label: "1080p", value: 1080 };
+    if (maxH >= 720) return { label: "720p", value: 720 };
+    return { label: "480p", value: 480 };
+  } catch { return { label: "720p", value: 720 }; }
 }
 
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
   const streams = [];
-
   try {
     let finalId = tmdbId;
-    const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
-    
-    if (isImdb) {
-      const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
-      if (convertedId) finalId = convertedId;
+    if (String(tmdbId).toLowerCase().startsWith("tt")) {
+      const converted = await convertImdbToTmdb(tmdbId, mediaType);
+      if (converted) finalId = converted;
       else return [];
     }
+
+    const s = season || 1;
+    const e = episode || 1;
+    const ajaxUrl = mediaType === "movie"
+      ? `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=movie`
+      : `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=tv&season=${s}&episode=${e}`;
     
-    let ajaxUrl, refererUrl;
-    if (mediaType === "movie") {
-      ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=movie`;
-      refererUrl = `https://playerflix.ink/filme/${finalId}`;
-    } else {
-      const s = season || 1;
-      const e = episode || 1;
-      ajaxUrl = `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=tv&season=${s}&episode=${e}`;
-      refererUrl = `https://playerflix.ink/serie/${finalId}/${s}/${e}`;
-    }
+    const refererUrl = mediaType === "movie"
+      ? `https://playerflix.ink/filme/${finalId}`
+      : `https://playerflix.ink/serie/${finalId}/${s}/${e}`;
+
+    const res = await fetch(ajaxUrl, { headers: getHeaders(refererUrl) });
+    if (!res.ok) return [];
     
-    const response = await fetch(ajaxUrl, { headers: getHeaders(refererUrl) });
-    if (!response.ok) return [];
-    
-    const html = await response.text();
-    
+    const html = await res.text();
     const players = [];
-    const playerRegex = /<div class="player-option"[^>]*data-embed="([^"]+)"[^>]*>[\s\S]*?<div class="player-name">([^<]+)<\/div>/g;
-    
+    const regex = /<div class="player-option"[^>]*data-embed="([^"]+)"[^>]*>[\s\S]*?<div class="player-name">([^<]+)<\/div>/g;
     let match;
-    while ((match = playerRegex.exec(html)) !== null) {
-      const embedBase64 = match[1];
-      const playerName = match[2].trim();
-      let embedUrl = "";
-      try { embedUrl = atob(embedBase64); } catch (e) { continue; }
-      players.push({ name: playerName, embedUrl });
-    }
-    
-    // ==============================================
-    // Stream 1 (WatchPlayer)
-    // ==============================================
-    const watchPlayer = players.find(p => p.name === "WatchPlayer");
-    if (watchPlayer) {
+    while ((match = regex.exec(html)) !== null) {
       try {
-        let watchUrl = watchPlayer.embedUrl;
-        
-        if (watchUrl.includes("watchplayer.xyz")) {
-          const watchHtmlResp = await fetch(watchUrl, {
-            headers: getHeaders("https://playerflix.ink/")
-          });
+        players.push({ name: match[2].trim(), url: atob(match[1]) });
+      } catch {}
+    }
+
+    // Stream 1: WatchPlayer
+    const wp = players.find(p => p.name === "WatchPlayer");
+    if (wp && wp.url.includes("watchplayer.xyz")) {
+      try {
+        let wUrl = wp.url;
+        const wRes = await fetch(wUrl, { headers: getHeaders("https://playerflix.ink/") });
+        if (wRes.ok) {
+          const wHtml = await wRes.text();
+          let videoId = null;
           
-          if (watchHtmlResp.ok) {
-            const watchHtml = await watchHtmlResp.text();
-            let videoId = null;
-            
-            if (mediaType === "movie") {
-              const dataIdMatch = watchHtml.match(/data-id="(\d+)"/);
-              if (dataIdMatch) videoId = dataIdMatch[1];
-            } else {
-              const s = season || 1;
-              const e = episode || 1;
-              const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
-              const contentMatch = watchHtml.match(pattern);
-              
-              if (contentMatch) {
-                const contentId = contentMatch[1];
-                
-                const optsResp = await fetch("https://watchplayer.xyz/api", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "X-Requested-With": "XMLHttpRequest",
-                    "User-Agent": getUserAgent(),
-                    "Referer": watchUrl,
-                    "Origin": "https://watchplayer.xyz"
-                  },
-                  body: `action=getOptions&contentid=${contentId}`
-                });
-                
-                if (optsResp.ok) {
-                  const optsData = await optsResp.json();
-                  if (optsData.data?.options?.length) {
-                    videoId = optsData.data.options[0].ID;
-                  }
-                }
-              }
-            }
-            
-            if (videoId) {
-              const playerResp = await fetch("https://watchplayer.xyz/api", {
+          if (mediaType === "movie") {
+            const m = wHtml.match(/data-id="(\d+)"/);
+            if (m) videoId = m[1];
+          } else {
+            const pattern = new RegExp(`data-contentid="(\\d+)"[^>]*data-season="${s}"[^>]*data-episode="${e}"`);
+            const cm = wHtml.match(pattern);
+            if (cm) {
+              const optsRes = await fetch("https://watchplayer.xyz/api", {
                 method: "POST",
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
-                  "X-Requested-With": "XMLHttpRequest",
-                  "User-Agent": getUserAgent(),
-                  "Referer": watchUrl,
-                  "Origin": "https://watchplayer.xyz"
-                },
-                body: `action=getPlayer&video_id=${videoId}`
+                headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "User-Agent": getUA(), "Referer": wUrl, "Origin": "https://watchplayer.xyz" },
+                body: `action=getOptions&contentid=${cm[1]}`
               });
-              
-              if (playerResp.ok) {
-                const playerData = await playerResp.json();
-                if (playerData.data?.video_url) {
-                  watchUrl = playerData.data.video_url;
-                }
+              if (optsRes.ok) {
+                const optsData = await optsRes.json();
+                if (optsData.data?.options?.length) videoId = optsData.data.options[0].ID;
               }
+            }
+          }
+
+          if (videoId) {
+            const pRes = await fetch("https://watchplayer.xyz/api", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "XMLHttpRequest", "User-Agent": getUA(), "Referer": wUrl, "Origin": "https://watchplayer.xyz" },
+              body: `action=getPlayer&video_id=${videoId}`
+            });
+            if (pRes.ok) {
+              const pData = await pRes.json();
+              if (pData.data?.video_url) wUrl = pData.data.video_url;
             }
           }
         }
         
-        if (watchUrl.includes('.m3u8') || watchUrl.includes('/hls/')) {
-          streams.push({
-            name: "Stream 1",
-            title: "720p",
-            url: watchUrl,
-            quality: 720,
-            type: "hls"
-          });
+        if (wUrl.includes('.m3u8') || wUrl.includes('/hls/')) {
+          streams.push({ name: "Stream 1", title: "720p", url: wUrl, quality: 720, type: "hls" });
         }
-      } catch (err) {}
+      } catch {}
     }
-    
-    // ==============================================
-    // Stream 2 (VIP Player)
-    // ==============================================
-    const vipPlayer = players.find(p => p.name === "VIP Player");
-    if (vipPlayer) {
+
+    // Stream 2: VIP Player
+    const vip = players.find(p => p.name === "VIP Player");
+    if (vip) {
       try {
-        const hashMatch = vipPlayer.embedUrl.match(/\/video\/([a-f0-9]+)/);
+        const hashMatch = vip.url.match(/\/video\/([a-f0-9]+)/);
         if (hashMatch) {
-          const videoHash = hashMatch[1];
-          
-          const vipResp = await fetch(`https://embedplayer2.xyz/player/index.php?data=${videoHash}&do=getVideo`, {
+          const hash = hashMatch[1];
+          const vipRes = await fetch(`https://embedplayer2.xyz/player/index.php?data=${hash}&do=getVideo`, {
             method: "POST",
-            headers: getHeaders(`https://embedplayer2.xyz/video/${videoHash}`, true),
-            body: `hash=${videoHash}&r=`
+            headers: getHeaders(`https://embedplayer2.xyz/video/${hash}`, true),
+            body: `hash=${hash}&r=`
           });
-          
-          if (vipResp.ok) {
-            const vipData = await vipResp.json();
-            
+          if (vipRes.ok) {
+            const vipData = await vipRes.json();
             if (vipData.securedLink) {
-              const quality = await detectBestQuality(vipData.securedLink);
-              
-              streams.push({
-                name: "Stream 2",
-                title: quality.label,
-                url: vipData.securedLink,
-                quality: quality.value,
-                type: "hls"
-              });
+              const q = await detectQuality(vipData.securedLink);
+              streams.push({ name: "Stream 2", title: q.label, url: vipData.securedLink, quality: q.value, type: "hls" });
             }
           }
         }
-      } catch (err) {}
+      } catch {}
     }
-    
+
     return streams;
-    
-  } catch (err) {
-    return [];
-  }
+  } catch { return []; }
 }
 
 module.exports = { getStreams };
