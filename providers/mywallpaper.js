@@ -119,6 +119,19 @@ async function getTMDBTitle(tmdbId, mediaType) {
     }
 }
 
+async function getTMDBOriginalTitle(tmdbId, mediaType) {
+    const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
+    const url = TMDB_BASE_URL + '/' + endpoint + '/' + tmdbId + '?api_key=' + TMDB_API_KEY + '&language=en-US';
+    try {
+        const response = await fetch(url, { redirect: 'follow' });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.original_title || data.original_name;
+    } catch {
+        return null;
+    }
+}
+
 async function getTMDBSeasonsInfo(tmdbId) {
     const url = `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${TMDB_API_KEY}&append_to_response=seasons`;
 
@@ -209,8 +222,10 @@ function dateToTimestamp(date) {
 async function searchAnilistId(title) {
     const query = `
         query ($search: String) {
-            Media(search: $search, type: ANIME) {
-                id
+            Page(perPage: 1) {
+                media(search: $search, type: ANIME) {
+                    id
+                }
             }
         }
     `;
@@ -224,7 +239,9 @@ async function searchAnilistId(title) {
 
     if (!response.ok) return null;
     const data = await response.json();
-    return data.data && data.data.Media ? data.data.Media.id : null;
+    return data.data && data.data.Page && data.data.Page.media && data.data.Page.media.length > 0 
+        ? data.data.Page.media[0].id 
+        : null;
 }
 
 function filterInvalidSeasons(seasons) {
@@ -438,51 +455,81 @@ function generateMinimalSlugs(seasonInfo, targetSeason) {
     return [...new Set(slugs)];
 }
 
-function getAniListTitles(tmdbId, mediaType) {
+// ==================== NOVA FUNÇÃO DE TÍTULOS COM FALLBACK ====================
+
+async function getAniListTitlesWithFallback(tmdbId, mediaType) {
     const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
     const tmdbUrl = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`;
 
-    return fetch(tmdbUrl, { redirect: 'follow' })
-        .then(response => {
-            if (!response.ok) throw new Error("TMDB erro");
-            return response.json();
-        })
-        .then(tmdbData => {
-            const searchTitle = mediaType === 'tv' ? tmdbData.name : tmdbData.title;
-            const query = `
-                query ($search: String) {
-                    Media(search: $search, type: ANIME) {
+    try {
+        const tmdbResponse = await fetch(tmdbUrl, { redirect: 'follow' });
+        if (!tmdbResponse.ok) throw new Error("TMDB erro");
+        const tmdbData = await tmdbResponse.json();
+
+        const searchTitle = mediaType === 'tv' ? tmdbData.name : tmdbData.title;
+        const originalTitle = tmdbData.original_title || tmdbData.original_name;
+
+        // 1. Tentar buscar no AniList
+        const query = `
+            query ($search: String) {
+                Page(perPage: 5) {
+                    media(search: $search) {
+                        id
+                        type
                         title { romaji english }
                         synonyms
                     }
-                }`;
-            return fetch('https://graphql.anilist.co', {
-                method: 'POST',
-                redirect: 'follow',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query, variables: { search: searchTitle } })
-            })
-            .then(res => res.json())
-            .then(anilistData => {
-                const media = anilistData?.data?.Media;
-                const titles = [];
+                }
+            }`;
+        
+        const anilistResponse = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            redirect: 'follow',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, variables: { search: searchTitle } })
+        });
 
-                if (media?.title?.romaji) {
-                    titles.push({ name: media.title.romaji, type: 'romaji' });
-                }
-                if (media?.title?.english && media.title.english !== media.title.romaji) {
-                    titles.push({ name: media.title.english, type: 'english' });
-                }
-                if (media?.synonyms) {
-                    for (const syn of media.synonyms) {
-                        if (!titles.some(t => t.name.toLowerCase() === syn.toLowerCase())) {
-                            titles.push({ name: syn, type: 'synonym' });
-                        }
+        const anilistData = await anilistResponse.json();
+        const mediaList = anilistData?.data?.Page?.media || [];
+        
+        // Filtra por Anime ou Movie
+        const relevantMedia = mediaList.filter(m => m.type === 'ANIME' || m.type === 'MOVIE');
+        const media = relevantMedia.length > 0 ? relevantMedia[0] : null;
+
+        const titles = [];
+
+        if (media) {
+            if (media.title?.romaji) {
+                titles.push({ name: media.title.romaji, type: 'romaji' });
+            }
+            if (media.title?.english && media.title.english !== media.title.romaji) {
+                titles.push({ name: media.title.english, type: 'english' });
+            }
+            if (media.synonyms) {
+                for (const syn of media.synonyms) {
+                    if (!titles.some(t => t.name.toLowerCase() === syn.toLowerCase())) {
+                        titles.push({ name: syn, type: 'synonym' });
                     }
                 }
-                return titles;
-            });
-        });
+            }
+        }
+
+        // 2. Fallback: Se não encontrou no AniList, usa títulos do TMDB
+        if (titles.length === 0) {
+            if (searchTitle) {
+                titles.push({ name: searchTitle, type: 'tmdb_english' });
+            }
+            if (originalTitle && originalTitle !== searchTitle) {
+                titles.push({ name: originalTitle, type: 'tmdb_original' });
+            }
+        }
+
+        return titles;
+
+    } catch (error) {
+        console.error("Erro ao buscar títulos:", error);
+        return [];
+    }
 }
 
 function generateSlugVariations(baseTitle, season) {
@@ -565,9 +612,28 @@ function buildStreamObject(url, name, title, quality, bingeGroup) {
     };
 }
 
+// ==================== DEBUG HELPER ====================
+
+function createDebugStream(title, content) {
+    return {
+        url: typeof content === 'object' ? JSON.stringify(content) : String(content),
+        name: 'My Wallpaper [DEBUG]',
+        title: title,
+        quality: 0,
+        type: 'debug'
+    };
+}
+
 // ==================== FUNÇÃO PRINCIPAL ====================
 
 async function getStreams(tmdbId, mediaType, season, episode) {
+    const debugs = [];
+    const addDebug = (title, content) => {
+        debugs.push(createDebugStream(title, content));
+    };
+
+    addDebug("🎬 INÍCIO", `ID: ${tmdbId} | ${mediaType} | S${season}E${episode}`);
+
     const targetSeason = mediaType === 'movie' ? 1 : season;
     const targetEpisode = mediaType === 'movie' ? 1 : episode;
     const epPadded = targetEpisode.toString().padStart(2, '0');
@@ -577,16 +643,21 @@ async function getStreams(tmdbId, mediaType, season, episode) {
     const isImdb = String(tmdbId).toLowerCase().startsWith("tt");
 
     if (isImdb) {
+        addDebug("🔄 CONVERTENDO IMDb", tmdbId);
         const convertedId = await convertImdbToTmdb(tmdbId, mediaType);
         if (convertedId) {
             finalId = convertedId;
+            addDebug("✅ IMDb CONVERTIDO", `TMDB ID: ${finalId}`);
         } else {
-            return [];
+            addDebug("❌ FALHA IMDb", "Não foi possível converter");
+            return debugs;
         }
     }
 
     // Verificação se é anime
+    addDebug("🔍 VERIFICANDO SE É ANIME", `TMDB ID: ${finalId}`);
     const animeCheck = await isAnime(finalId, mediaType);
+    addDebug("📊 RESULTADO ANIME", animeCheck ? "É anime" : "NÃO é anime (continuando mesmo assim)");
 
     try {
         let validStreams = [];
@@ -594,22 +665,29 @@ async function getStreams(tmdbId, mediaType, season, episode) {
 
         // ==================== FILMES ====================
         if (mediaType === 'movie') {
-            const titles = await getAniListTitles(finalId, mediaType);
+            addDebug("🎬 MODO FILME", "Buscando títulos (AniList + TMDB Fallback)...");
+            
+            // Usa a nova função com fallback
+            const titles = await getAniListTitlesWithFallback(finalId, mediaType);
+            addDebug("📋 TÍTULOS ENCONTRADOS", `${titles?.length || 0} títulos`);
 
             if (titles?.length > 0) {
                 for (const titleInfo of titles) {
-                    if (titleInfo.type !== 'romaji' && titleInfo.type !== 'english') continue;
-
+                    // Gera slug para cada título encontrado (Romaji, English, TMDB, etc)
                     const slug = titleToSlug(titleInfo.name);
                     const firstLetter = slug.charAt(0) || 't';
 
-                    // URL de filme: /stream/<letra>/<slug>/filme.mp4/index.m3u8
-                    const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/filme.mp4/index.m3u8`;
-                    const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/filme.mp4/index.m3u8`;
+                    // Filmes usam o mesmo formato: /01.mp4/index.m3u8 (episódio único)
+                    const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/01.mp4/index.m3u8`;
+                    const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/01.mp4/index.m3u8`;
 
+                    addDebug(`🔤 SLUG [${titleInfo.type}]`, slug);
+                    
                     if (!seenStreamUrls[legUrl]) {
                         seenStreamUrls[legUrl] = true;
+                        addDebug("📡 TESTANDO LEG", legUrl);
                         if (await testUrl(legUrl)) {
+                            addDebug("✅ ENCONTRADO LEG", legUrl);
                             validStreams.push(buildStreamObject(
                                 legUrl,
                                 'My Wallpaper Legendado',
@@ -617,12 +695,16 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                                 1080,
                                 'mywallpaper-' + slug
                             ));
+                        } else {
+                            addDebug("❌ FALHA LEG", "404");
                         }
                     }
 
                     if (!seenStreamUrls[dubUrl]) {
                         seenStreamUrls[dubUrl] = true;
+                        addDebug("📡 TESTANDO DUB", dubUrl);
                         if (await testUrl(dubUrl)) {
+                            addDebug("✅ ENCONTRADO DUB", dubUrl);
                             validStreams.push(buildStreamObject(
                                 dubUrl,
                                 'My Wallpaper Dublado',
@@ -630,63 +712,35 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                                 1080,
                                 'mywallpaper-' + slug
                             ));
-                        }
-                    }
-                }
-            }
-
-            // Fallback: tenta com título TMDB
-            if (validStreams.length === 0) {
-                const movieTitle = await getTMDBTitle(finalId, mediaType);
-                if (movieTitle) {
-                    const slug = titleToSlug(movieTitle);
-                    const firstLetter = slug.charAt(0) || 't';
-
-                    const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/filme.mp4/index.m3u8`;
-                    const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/filme.mp4/index.m3u8`;
-
-                    if (!seenStreamUrls[legUrl]) {
-                        seenStreamUrls[legUrl] = true;
-                        if (await testUrl(legUrl)) {
-                            validStreams.push(buildStreamObject(
-                                legUrl,
-                                'My Wallpaper Legendado',
-                                movieTitle,
-                                1080,
-                                'mywallpaper-' + slug
-                            ));
-                        }
-                    }
-
-                    if (!seenStreamUrls[dubUrl]) {
-                        seenStreamUrls[dubUrl] = true;
-                        if (await testUrl(dubUrl)) {
-                            validStreams.push(buildStreamObject(
-                                dubUrl,
-                                'My Wallpaper Dublado',
-                                movieTitle,
-                                1080,
-                                'mywallpaper-' + slug
-                            ));
+                        } else {
+                            addDebug("❌ FALHA DUB", "404");
                         }
                     }
                 }
             }
 
             validStreams.sort((a, b) => b.quality - a.quality);
-            return validStreams;
+
+            if (validStreams.length === 0) {
+                addDebug("❌ FIM", "Nenhum stream de filme encontrado");
+                return debugs;
+            }
+
+            addDebug("✅ FIM", `${validStreams.length} streams encontrados`);
+            return [...validStreams, ...debugs];
         }
 
         // ==================== SÉRIES (TV) ====================
-        const titles = await getAniListTitles(finalId, mediaType);
+        addDebug("📡 BUSCANDO TÍTULOS ANILIST", `TMDB ID: ${finalId}`);
+        const titles = await getAniListTitlesWithFallback(finalId, mediaType);
+        addDebug("📋 TÍTULOS ENCONTRADOS", `${titles?.length || 0} títulos`);
 
         if (titles?.length > 0) {
             const streamMap = {};
 
             for (const titleInfo of titles) {
-                if (titleInfo.type !== 'romaji' && titleInfo.type !== 'english') continue;
-
                 const slugVariations = generateSlugVariations(titleInfo.name, targetSeason);
+                addDebug(`🔤 SLUGS [${titleInfo.type}]`, `${titleInfo.name}: ${slugVariations.length} variações`);
 
                 for (const slug of slugVariations) {
                     const firstLetter = slug.charAt(0) || 't';
@@ -718,9 +772,14 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }
 
             const allUrls = Object.values(streamMap).flat();
+            addDebug("🔗 URLS PARA TESTAR", `${allUrls.length} combinações`);
 
             for (const item of allUrls) {
+                addDebug("📡 TESTANDO", item.url);
+
                 if (await testUrl(item.url)) {
+                    addDebug("✅ ENCONTRADO", item.url);
+
                     let originalTitle = '';
                     for (const key in streamMap) {
                         const found = streamMap[key].find(u => u.url === item.url);
@@ -742,14 +801,19 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         }
 
         if (validStreams.length === 0) {
+            addDebug("⚠️ FASE 2", "Buscando por episódio absoluto...");
+
             const seasonsInfo = await getTMDBSeasonsInfo(finalId);
+            addDebug("📊 TEMPORADAS TMDB", seasonsInfo ? `${seasonsInfo.length} temporadas` : "Nenhuma");
 
             if (seasonsInfo?.length) {
                 const absoluteEpisode = calculateAbsoluteEpisode(seasonsInfo, targetSeason, targetEpisode);
+                addDebug("🔢 EPISÓDIO ABSOLUTO", absoluteEpisode || "Não calculado");
 
                 if (absoluteEpisode) {
                     const absEpPadded = absoluteEpisode.toString().padStart(2, '0');
                     const animeTitle = await getTMDBTitle(finalId, mediaType);
+                    addDebug("📺 TÍTULO TMDB", animeTitle || "Não encontrado");
 
                     if (animeTitle) {
                         const baseSlug = titleToSlug(animeTitle);
@@ -764,13 +828,16 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                         }
 
                         const uniqueSlugs = [...new Set(absoluteSlugs)];
+                        addDebug("🔤 SLUGS ABSOLUTOS", `${uniqueSlugs.length} variações`);
 
                         for (const slug of uniqueSlugs) {
                             const firstLetter = slug.charAt(0) || 't';
 
                             const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/${absEpPadded}.mp4/index.m3u8`;
+                            addDebug("📡 TESTANDO", legUrl);
                             if (!seenStreamUrls[legUrl] && await testUrl(legUrl)) {
                                 seenStreamUrls[legUrl] = true;
+                                addDebug("✅ ENCONTRADO", legUrl);
                                 validStreams.push(buildStreamObject(
                                     legUrl,
                                     'My Wallpaper Legendado',
@@ -781,8 +848,10 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                             }
 
                             const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${absEpPadded}.mp4/index.m3u8`;
+                            addDebug("📡 TESTANDO", dubUrl);
                             if (!seenStreamUrls[dubUrl] && await testUrl(dubUrl)) {
                                 seenStreamUrls[dubUrl] = true;
+                                addDebug("✅ ENCONTRADO", dubUrl);
                                 validStreams.push(buildStreamObject(
                                     dubUrl,
                                     'My Wallpaper Dublado',
@@ -798,31 +867,41 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         }
 
         if (validStreams.length === 0) {
+            addDebug("⚠️ FASE 3", "Buscando por data do episódio + AniList...");
+
             const episodeDate = await getTMDBEpisodeDate(finalId, targetSeason, targetEpisode);
+            addDebug("📅 DATA DO EPISÓDIO", episodeDate ? new Date(episodeDate).toISOString() : "Não encontrada");
 
             if (episodeDate) {
                 const animeTitle = await getTMDBTitle(finalId, mediaType);
+                addDebug("📺 TÍTULO TMDB", animeTitle || "Não encontrado");
 
                 if (animeTitle) {
                     const anilistId = await searchAnilistId(animeTitle);
+                    addDebug("🔗 ANILIST ID", anilistId || "Não encontrado");
 
                     if (anilistId) {
                         const allSeasons = await getAllSeasons(anilistId);
+                        addDebug("📊 TEMPORADAS ANILIST", `${allSeasons.length} temporadas`);
 
                         if (allSeasons.length) {
                             const seasonInfo = analyzeParts(allSeasons, targetEpisode, episodeDate);
+                            addDebug("✅ MATCH ANILIST", seasonInfo ? `Parte ${seasonInfo.partNumber}, Ep ${seasonInfo.episodeInPart}` : "Nenhum match");
 
                             if (seasonInfo) {
                                 const slugs = generateMinimalSlugs(seasonInfo, targetSeason);
                                 const testEpisode = seasonInfo.episodeInPart || targetEpisode;
                                 const testEpPadded = testEpisode.toString().padStart(2, '0');
+                                addDebug("🔤 SLUGS MINIMOS", `${slugs.length} variações`);
 
                                 for (const slug of slugs) {
                                     const firstLetter = slug.charAt(0) || 't';
 
                                     const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/${testEpPadded}.mp4/index.m3u8`;
+                                    addDebug("📡 TESTANDO", legUrl);
                                     if (!seenStreamUrls[legUrl] && await testUrl(legUrl)) {
                                         seenStreamUrls[legUrl] = true;
+                                        addDebug("✅ ENCONTRADO", legUrl);
                                         validStreams.push(buildStreamObject(
                                             legUrl,
                                             'My Wallpaper Legendado',
@@ -833,8 +912,10 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                                     }
 
                                     const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/${testEpPadded}.mp4/index.m3u8`;
+                                    addDebug("📡 TESTANDO", dubUrl);
                                     if (!seenStreamUrls[dubUrl] && await testUrl(dubUrl)) {
                                         seenStreamUrls[dubUrl] = true;
+                                        addDebug("✅ ENCONTRADO", dubUrl);
                                         validStreams.push(buildStreamObject(
                                             dubUrl,
                                             'My Wallpaper Dublado',
@@ -852,10 +933,18 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         }
 
         validStreams.sort((a, b) => b.quality - a.quality);
-        return validStreams;
+
+        if (validStreams.length === 0) {
+            addDebug("❌ FIM", "Nenhum stream encontrado");
+            return debugs;
+        }
+
+        addDebug("✅ FIM", `${validStreams.length} streams encontrados`);
+        return [...validStreams, ...debugs];
 
     } catch (error) {
-        return [];
+        addDebug("❌ ERRO", error.message || String(error));
+        return debugs;
     }
 }
 
