@@ -9,7 +9,8 @@
       "version": "1.0.0",
       "author": "lawlietbr",
       "supportedTypes": [
-        "tv"
+        "tv",
+        "movie"
       ],
       "filename": "providers/mywallpaper.js",
       "enabled": true,
