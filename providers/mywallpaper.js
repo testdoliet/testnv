@@ -532,6 +532,52 @@ async function getAniListTitlesWithFallback(tmdbId, mediaType) {
     }
 }
 
+// ==================== GERADOR DE VARIAÇÕES DE SLUG (USADO EM FILMES E SÉRIES) ====================
+
+function generateMovieSlugVariations(title) {
+    const slugs = [];
+    const seen = new Set();
+
+    const addSlug = (slug) => {
+        if (slug && !seen.has(slug)) {
+            seen.add(slug);
+            slugs.push(slug);
+        }
+    };
+
+    // 1. Slug completo
+    const fullSlug = titleToSlug(title);
+    addSlug(fullSlug);
+
+    // 2. Remover subtítulos após dois-pontos ou parênteses
+    // Ex: "Attack on Titan: THE LAST ATTACK" -> "Attack on Titan"
+    const baseTitle = title.split(':')[0].split('(')[0].trim();
+    if (baseTitle !== title) {
+        addSlug(titleToSlug(baseTitle));
+    }
+
+    // 3. Remover anos e palavras comuns de filme
+    const cleanedTitle = baseTitle
+        .replace(/\s*$\d{4}$/g, '') // Remove (2024)
+        .replace(/\b(Movie|Film|The Movie|O Filme)\b/gi, '') // Remove "Movie"
+        .trim();
+    
+    if (cleanedTitle !== baseTitle) {
+        addSlug(titleToSlug(cleanedTitle));
+    }
+
+    // 4. Variações reduzidas (palavras-chave)
+    const words = fullSlug.split('-');
+    if (words.length > 2) {
+        // Tenta combinações menores, ex: attack-on-titan -> attack-on -> attack
+        for (let i = words.length - 1; i >= 2; i--) {
+            addSlug(words.slice(0, i).join('-'));
+        }
+    }
+
+    return slugs;
+}
+
 function generateSlugVariations(baseTitle, season) {
     const baseSlug = titleToSlug(baseTitle);
     const variations = [];
@@ -673,47 +719,49 @@ async function getStreams(tmdbId, mediaType, season, episode) {
 
             if (titles?.length > 0) {
                 for (const titleInfo of titles) {
-                    // Gera slug para cada título encontrado (Romaji, English, TMDB, etc)
-                    const slug = titleToSlug(titleInfo.name);
-                    const firstLetter = slug.charAt(0) || 't';
+                    // Gera múltiplas variações de slug para filmes, igual às séries
+                    const slugVariations = generateMovieSlugVariations(titleInfo.name);
+                    addDebug(`🔤 SLUGS [${titleInfo.type}]`, `${titleInfo.name}: ${slugVariations.length} variações`);
 
-                    // Filmes usam o mesmo formato: /01.mp4/index.m3u8 (episódio único)
-                    const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/01.mp4/index.m3u8`;
-                    const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/01.mp4/index.m3u8`;
+                    for (const slug of slugVariations) {
+                        const firstLetter = slug.charAt(0) || 't';
 
-                    addDebug(`🔤 SLUG [${titleInfo.type}]`, slug);
-                    
-                    if (!seenStreamUrls[legUrl]) {
-                        seenStreamUrls[legUrl] = true;
-                        addDebug("📡 TESTANDO LEG", legUrl);
-                        if (await testUrl(legUrl)) {
-                            addDebug("✅ ENCONTRADO LEG", legUrl);
-                            validStreams.push(buildStreamObject(
-                                legUrl,
-                                'My Wallpaper Legendado',
-                                titleInfo.name,
-                                1080,
-                                'mywallpaper-' + slug
-                            ));
-                        } else {
-                            addDebug("❌ FALHA LEG", "404");
+                        // Filmes usam o mesmo formato: /01.mp4/index.m3u8 (episódio único)
+                        const legUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}/01.mp4/index.m3u8`;
+                        const dubUrl = `${CDN_BASE}/stream/${firstLetter}/${slug}-dublado/01.mp4/index.m3u8`;
+
+                        if (!seenStreamUrls[legUrl]) {
+                            seenStreamUrls[legUrl] = true;
+                            addDebug("📡 TESTANDO LEG", legUrl);
+                            if (await testUrl(legUrl)) {
+                                addDebug("✅ ENCONTRADO LEG", legUrl);
+                                validStreams.push(buildStreamObject(
+                                    legUrl,
+                                    'My Wallpaper Legendado',
+                                    titleInfo.name,
+                                    1080,
+                                    'mywallpaper-' + slug
+                                ));
+                            } else {
+                                addDebug("❌ FALHA LEG", "404");
+                            }
                         }
-                    }
 
-                    if (!seenStreamUrls[dubUrl]) {
-                        seenStreamUrls[dubUrl] = true;
-                        addDebug("📡 TESTANDO DUB", dubUrl);
-                        if (await testUrl(dubUrl)) {
-                            addDebug("✅ ENCONTRADO DUB", dubUrl);
-                            validStreams.push(buildStreamObject(
-                                dubUrl,
-                                'My Wallpaper Dublado',
-                                titleInfo.name,
-                                1080,
-                                'mywallpaper-' + slug
-                            ));
-                        } else {
-                            addDebug("❌ FALHA DUB", "404");
+                        if (!seenStreamUrls[dubUrl]) {
+                            seenStreamUrls[dubUrl] = true;
+                            addDebug("📡 TESTANDO DUB", dubUrl);
+                            if (await testUrl(dubUrl)) {
+                                addDebug("✅ ENCONTRADO DUB", dubUrl);
+                                validStreams.push(buildStreamObject(
+                                    dubUrl,
+                                    'My Wallpaper Dublado',
+                                    titleInfo.name,
+                                    1080,
+                                    'mywallpaper-' + slug
+                                ));
+                            } else {
+                                addDebug("❌ FALHA DUB", "404");
+                            }
                         }
                     }
                 }
