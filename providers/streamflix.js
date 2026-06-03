@@ -191,7 +191,7 @@ function reconstructKey(payload) {
   const indices = map[String(payload.version)] || [];
   const selected = indices.map(i => keyParts[i-1]).filter(p => p);
   const parts = selected.length > 0 ? selected : keyParts.slice(0, 2);
-  
+
   const decoded = parts.map(p => base64ToBytes(p));
   const total = decoded.reduce((a, b) => a + b.length, 0);
   const out = new Uint8Array(total);
@@ -209,7 +209,7 @@ function decryptPlayback(playback) {
     const plain = new AES256GCM(key).decrypt(iv, ct);
     const json = JSON.parse(plain);
     const url = json.url || json.sources?.[0]?.url || json.data?.sources?.[0]?.url;
-    return url ? { success: true, url: url.replace(/\\u0026/g, '&') } : { success: false };
+    return url ? { success: true, url: url.replace(/\u0026/g, '&') } : { success: false };
   } catch { return { success: false }; }
 }
 
@@ -230,6 +230,17 @@ async function convertImdbToTmdb(id, type) {
     const data = await res.json();
     return type === "tv" ? data.tv_results?.[0]?.id : data.movie_results?.[0]?.id;
   } catch { return null; }
+}
+
+// ==============================================
+// URL PARSER FALLBACK (Quick.js safe)
+// ==============================================
+function getOrigin(url) {
+  try {
+    if (typeof URL !== 'undefined') return new URL(url).origin;
+  } catch(e) {}
+  const m = url.match(/^https?:\/\/[^\/]+/);
+  return m ? m[0] : '';
 }
 
 // ==============================================
@@ -273,7 +284,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = 1, episode = 1) 
     if (!detRes.ok) return [];
     const detData = await detRes.json();
     if (!detData.embed_frame_url) return [];
-    const pDomain = new URL(detData.embed_frame_url).origin;
+    const pDomain = getOrigin(detData.embed_frame_url);
 
     // 4. Challenge (Optional but good for health)
     try {
@@ -300,12 +311,28 @@ async function getStreams(tmdbId, mediaType = "movie", season = 1, episode = 1) 
 
     const dec = decryptPlayback(pbData.playback);
     if (dec.success) {
+      // ==============================================
+      // FIX: Headers necessários para o Nuvio player
+      // ==============================================
       return [{
         name: "Pomfy",
         title: "1080p",
         url: dec.url,
         quality: 1080,
-        type: "hls"
+        type: "hls",
+        // Headers que o Nuvio vai passar ao player
+        headers: {
+          "User-Agent": getUA(),
+          "Referer": pDomain + "/",
+          "Origin": pDomain,
+          "Accept": "*/*",
+          "Accept-Language": "pt-BR,pt;q=0.9"
+        },
+        // Comportamento do player
+        behaviorHints: {
+          notWebReady: true,
+          bingeGroup: "pomfy-" + byseId
+        }
       }];
     }
     return [];
