@@ -175,10 +175,6 @@ class AES256GCM {
   }
 }
 
-// ==============================================
-// KEY RECONSTRUCTION
-// ==============================================
-
 function buildVersionMap() {
   const map = {};
   for (let n = 1; n <= 30; n++) map[String(n)] = [n ^ 0, 31 - n ^ 0];
@@ -213,10 +209,6 @@ function decryptPlayback(playback) {
   } catch { return { success: false }; }
 }
 
-// ==============================================
-// HELPERS
-// ==============================================
-
 function generateFingerprint() {
   const rand = (l) => Array.from({length:l}, () => 'abcdef0123456789'[Math.floor(Math.random()*16)]).join('');
   const ts = Math.floor(Date.now()/1000);
@@ -232,9 +224,6 @@ async function convertImdbToTmdb(id, type) {
   } catch { return null; }
 }
 
-// ==============================================
-// URL PARSER FALLBACK (Quick.js safe)
-// ==============================================
 function getOrigin(url) {
   try {
     if (typeof URL !== 'undefined') return new URL(url).origin;
@@ -242,10 +231,6 @@ function getOrigin(url) {
   const m = url.match(/^https?:\/\/[^\/]+/);
   return m ? m[0] : '';
 }
-
-// ==============================================
-// MAIN
-// ==============================================
 
 async function getStreams(tmdbId, mediaType = "movie", season = 1, episode = 1) {
   try {
@@ -311,16 +296,12 @@ async function getStreams(tmdbId, mediaType = "movie", season = 1, episode = 1) 
 
     const dec = decryptPlayback(pbData.playback);
     if (dec.success) {
-      // ==============================================
-      // FIX: Headers necessários para o Nuvio player
-      // ==============================================
       return [{
         name: "Pomfy",
-        title: "1080p",
+        title: '1080p',
         url: dec.url,
         quality: 1080,
         type: "hls",
-        // Headers que o Nuvio vai passar ao player
         headers: {
           "User-Agent": getUA(),
           "Referer": pDomain + "/",
@@ -328,7 +309,6 @@ async function getStreams(tmdbId, mediaType = "movie", season = 1, episode = 1) 
           "Accept": "*/*",
           "Accept-Language": "pt-BR,pt;q=0.9"
         },
-        // Comportamento do player
         behaviorHints: {
           notWebReady: true,
           bingeGroup: "pomfy-" + byseId
