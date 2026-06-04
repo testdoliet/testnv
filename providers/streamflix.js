@@ -29,6 +29,10 @@ const HEADERS = {
   "Upgrade-Insecure-Requests": "1"
 };
 
+const STREAM_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+    'Referer': 'https://pomfy.online/'
+};
 const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function base64ToBytes(base64) {
@@ -460,7 +464,8 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     if (decryptResult.success) {
       streams.push({
         name: "Pomfy",
-        title: "1080p",
+        title: "1080P",
+        headers: STREAM_HEADERS,
         url: decryptResult.url,
         quality: 1080,
         type: "hls"
