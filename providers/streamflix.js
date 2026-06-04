@@ -305,14 +305,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = 1, episode = 1) 
         title: "1080p",
         url: dec.url,
         quality: 1080,
-        type: "hls",
-        headers: {
-          "User-Agent": getUA(),
-          "Referer": "https://pomfy.online/",
-          "Origin": "https://pomfy.online",
-          "Accept": "*/*",
-          "Accept-Language": "pt-BR,pt;q=0.9"
-        }
+        type: "hls"
       }];
     }
     return [];
