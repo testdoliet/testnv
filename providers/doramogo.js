@@ -13,26 +13,48 @@ let cachedProxies = null;
 let proxyExpiry = 0;
 const PROXY_CACHE_TIME = 60 * 60 * 1000;
 
-function b64encode(str) {
-    if (typeof btoa !== 'undefined') return btoa(str);
-    var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    var out = '';
-    var i = 0;
-    while (i < str.length) {
-        var c1 = str.charCodeAt(i++);
-        var c2 = i < str.length ? str.charCodeAt(i++) : 0;
-        var c3 = i < str.length ? str.charCodeAt(i++) : 0;
-        var e1 = c1 >> 2;
-        var e2 = ((c1 & 3) << 4) | (c2 >> 4);
-        var e3 = ((c2 & 15) << 2) | (c3 >> 6);
-        var e4 = c3 & 63;
-        if (isNaN(c2)) { e3 = e4 = 64; }
-        else if (isNaN(c3)) { e4 = 64; }
-        out += chars.charAt(e1) + chars.charAt(e2) + chars.charAt(e3) + chars.charAt(e4);
-    }
-    return out;
+// ==================== DEBUG STREAM ====================
+const DEBUG_LOGS = [];
+
+function log(label, data) {
+    var ts = new Date().toISOString();
+    var entry = { time: ts, label: label };
+    if (data !== undefined) entry.data = data;
+    DEBUG_LOGS.push(entry);
 }
 
+function logError(label, err) {
+    var ts = new Date().toISOString();
+    DEBUG_LOGS.push({ time: ts, label: 'ERROR: ' + label, error: err && err.message ? err.message : String(err) });
+}
+
+function buildDebugUrl() {
+    var lines = [];
+    for (var i = 0; i < DEBUG_LOGS.length; i++) {
+        var e = DEBUG_LOGS[i];
+        var line = '[' + e.time + '] ' + e.label;
+        if (e.data !== undefined) {
+            line += ': ' + (typeof e.data === 'object' ? JSON.stringify(e.data) : String(e.data));
+        }
+        if (e.error !== undefined) line += ' | ERR: ' + e.error;
+        lines.push(line);
+    }
+    var body = lines.join('\n');
+    // btoa nativo - funciona no Quick.js
+    return 'data:text/plain;base64,' + btoa(body);
+}
+
+function makeDebugStream(title, subtitle) {
+    return [{
+        url: buildDebugUrl(),
+        name: 'Debug Log',
+        title: (title || 'Debug') + (subtitle ? ' - ' + subtitle : ''),
+        headers: {},
+        type: 'text/plain'
+    }];
+}
+
+// ==================== STOPWORDS & NORMALIZATION ====================
 const STOPWORDS = {
     a: 1, o: 1, os: 1, as: 1, de: 1, do: 1, da: 1, dos: 1, das: 1,
     the: 1, of: 1, and: 1, e: 1, no: 1, na: 1, nos: 1, nas: 1,
@@ -81,6 +103,8 @@ function stripListSuffix(slug) {
         .replace(/-todos-os-episodios$/, '')
         .replace(/-todos-episodios$/, '');
 }
+
+// ==================== SCORING & MATCHING ====================
 
 function buildExpectedRoots(tmdbInfo) {
     var titles = [tmdbInfo.title, tmdbInfo.originalTitle]
@@ -168,6 +192,7 @@ function scoreResult(slug, tmdbInfo, expectedRoots, strongTokens, index) {
     return score;
 }
 
+// ==================== NUMBER CONVERSION ====================
 const NUMBER_WORDS = {
     '0': 'zero', '1': 'um', '2': 'dois', '3': 'tres',
     '4': 'quatro', '5': 'cinco', '6': 'seis',
@@ -190,6 +215,8 @@ function titleToSlug(title, convertNumbers) {
         .replace(/^-|-$/g, '');
 }
 
+// ==================== HTTP HELPERS ====================
+
 async function fetchText(url, opts) {
     if (!opts) opts = {};
     try {
@@ -210,20 +237,30 @@ async function fetchText(url, opts) {
 }
 
 async function testUrl(url) {
+    log('testUrl', url);
     try {
         var response = await fetch(url, { method: 'HEAD', headers: HEADERS });
-        return response.ok || response.status === 206;
+        var ok = response.ok || response.status === 206;
+        log('testUrl result', { url: url, status: response.status, ok: ok });
+        return ok;
     } catch (err) {
+        logError('testUrl', err);
         return false;
     }
 }
 
+// ==================== BUSCA AUTOMÁTICA DE PROXIES ====================
+
 async function fetchProxies() {
+    log('fetchProxies start');
     if (cachedProxies && Date.now() < proxyExpiry) {
+        log('fetchProxies cache hit', cachedProxies);
         return cachedProxies;
     }
+    log('fetchProxies fetching', PROXY_SOURCE_URL);
     try {
         var res = await fetchText(PROXY_SOURCE_URL, { headers: HEADERS });
+        log('fetchProxies status', res.status);
         if (!res || res.status !== 200) return null;
         var primaryMatch = res.text.match(/const\s+PRIMARY_URL\s*=\s*['"]([^'"]+)['"]/);
         var fallbackMatch = res.text.match(/const\s+FALLBACK_URL\s*=\s*['"]([^'"]+)['"]/);
@@ -233,18 +270,25 @@ async function fetchProxies() {
         };
         cachedProxies = proxies;
         proxyExpiry = Date.now() + PROXY_CACHE_TIME;
+        log('fetchProxies updated', proxies);
         return proxies;
     } catch (err) {
+        logError('fetchProxies', err);
         return null;
     }
 }
 
+// ==================== CONVERSOR IMDb → TMDB ====================
+
 async function convertImdbToTmdb(imdbId, mediaType) {
+    log('convertImdbToTmdb', { imdbId: imdbId, mediaType: mediaType });
     try {
         var url = TMDB_BASE_URL + '/find/' + imdbId + '?api_key=' + TMDB_API_KEY + '&external_source=imdb_id';
+        log('convertImdbToTmdb url', url);
         var response = await fetch(url, {
             headers: { 'User-Agent': HEADERS['User-Agent'], 'Accept': 'application/json' }
         });
+        log('convertImdbToTmdb status', response.status);
         if (!response.ok) return null;
         var data = await response.json();
         var result = null;
@@ -253,21 +297,29 @@ async function convertImdbToTmdb(imdbId, mediaType) {
         } else {
             if (data.tv_results && data.tv_results.length > 0) result = data.tv_results[0].id;
         }
+        log('convertImdbToTmdb result', result);
         return result;
     } catch (err) {
+        logError('convertImdbToTmdb', err);
         return null;
     }
 }
 
+// ==================== FUNÇÕES TMDB ====================
+
 async function getTMDBTitle(tmdbId, mediaType) {
+    log('getTMDBTitle', { tmdbId: tmdbId, mediaType: mediaType });
     var cacheKey = tmdbId + '_' + mediaType;
     if (CACHE[cacheKey]) {
+        log('getTMDBTitle cache hit', CACHE[cacheKey]);
         return CACHE[cacheKey];
     }
     var endpoint = mediaType === 'tv' ? 'tv' : 'movie';
     var url = TMDB_BASE_URL + '/' + endpoint + '/' + tmdbId + '?api_key=' + TMDB_API_KEY + '&language=pt-BR';
+    log('getTMDBTitle url', url);
     try {
         var response = await fetch(url);
+        log('getTMDBTitle status', response.status);
         var data = await response.json();
         var title = mediaType === 'tv' ? data.name : data.title;
         var originalTitle = mediaType === 'tv' ? data.original_name : data.original_title;
@@ -290,13 +342,18 @@ async function getTMDBTitle(tmdbId, mediaType) {
         else if (mediaType === 'movie' && data.release_date) ano = data.release_date.substring(0, 4);
         var result = { title: title, originalTitle: originalTitle, altTitles: altTitles, year: ano };
         CACHE[cacheKey] = result;
+        log('getTMDBTitle result', result);
         return result;
     } catch (err) {
+        logError('getTMDBTitle', err);
         return null;
     }
 }
 
+// ==================== GERAÇÃO DE SLUGS (DIRECT GUESS) ====================
+
 function generateSlugVariations(baseTitle, season, ano) {
+    log('generateSlugVariations', { baseTitle: baseTitle, season: season, ano: ano });
     var baseSlugWords = titleToSlug(baseTitle, true);
     var baseSlugNumbers = titleToSlug(baseTitle, false);
     var variations = [];
@@ -305,9 +362,11 @@ function generateSlugVariations(baseTitle, season, ano) {
         if (!seen[slug]) {
             seen[slug] = true;
             variations.push({ slug: slug, source: source || 'unknown' });
+            log('generateSlugVariations add', { slug: slug, source: source, total: variations.length });
         }
     }
     var slugBases = baseSlugWords === baseSlugNumbers ? [baseSlugWords] : [baseSlugWords, baseSlugNumbers];
+    log('generateSlugVariations bases', slugBases);
     for (var b = 0; b < slugBases.length; b++) {
         var baseSlug = slugBases[b];
         var words = baseSlug.split('-');
@@ -332,15 +391,21 @@ function generateSlugVariations(baseTitle, season, ano) {
             }
         }
     }
+    log('generateSlugVariations total', variations.length);
     return variations;
 }
 
+// ==================== BUSCA NO DORAMOGO ====================
+
 async function searchDoramogo(query) {
+    log('searchDoramogo', query);
     var slugQuery = slugify(query);
     if (!slugQuery) return [];
     var url = DORAMOGO_BASE + '/search/?q=' + encodeURIComponent(query);
+    log('searchDoramogo url', url);
     var res = await fetchText(url);
     if (!res || res.status !== 200 || res.text.length < 2000) {
+        log('searchDoramogo fail', { status: res ? res.status : -1, len: res ? res.text.length : 0 });
         return [];
     }
     var results = [];
@@ -354,46 +419,68 @@ async function searchDoramogo(query) {
         seen[slug] = 1;
         results.push({ url: full, slug: slug });
     }
+    log('searchDoramogo found', results.length);
+    log('searchDoramogo slugs', results.map(function(r) { return r.slug; }));
     return results;
 }
 
+// ==================== FUNÇÃO PRINCIPAL ====================
+
 async function getStreams(tmdbId, mediaType, season, episode) {
+    DEBUG_LOGS.length = 0;
+    log('getStreams START', { tmdbId: tmdbId, mediaType: mediaType, season: season, episode: episode });
+
     var targetSeason = mediaType === 'movie' ? 1 : season;
     var targetEpisode = mediaType === 'movie' ? 1 : episode;
     var epPadded = targetEpisode.toString().padStart(2, '0');
     var seasonPadded = targetSeason.toString().padStart(2, '0');
     var timestamp = Date.now();
 
+    log('getStreams normalized', { targetSeason: targetSeason, targetEpisode: targetEpisode, epPadded: epPadded, seasonPadded: seasonPadded });
+
+    // Busca proxies
     var proxies = await fetchProxies();
     if (!proxies) {
         proxies = { primary: 'https://ondemand.netflxx.shop', fallback: 'https://forks-doramas.netflxx.shop' };
+        log('getStreams fallback proxies', proxies);
     }
     var cdnList = [proxies.primary, proxies.fallback];
 
+    // Conversão IMDb → TMDB
     var finalId = tmdbId;
     var isImdb = String(tmdbId).toLowerCase().startsWith('tt');
     if (isImdb) {
+        log('getStreams imdb detected');
         var convertedId = await convertImdbToTmdb(tmdbId, mediaType);
         if (convertedId) finalId = convertedId;
         else {
-            return [];
+            log('getStreams imdb conversion failed');
+            return makeDebugStream('Doramogo', 'IMDb conversion failed');
         }
     }
 
+    // Info TMDB
     var info = await getTMDBTitle(finalId, mediaType);
     if (!info) {
-        return [];
+        log('getStreams tmdb fail');
+        return makeDebugStream('Doramogo', 'TMDB fetch failed');
     }
+    log('getStreams tmdb info', info);
 
     var expectedRoots = buildExpectedRoots(info);
     var strongTokens = buildStrongTokens(info);
+    log('getStreams expectedRoots', expectedRoots);
+    log('getStreams strongTokens', strongTokens);
 
+    // ─── PASSO 1: DIRECT GUESS ───
+    log('getStreams STEP 1: DIRECT GUESS');
     var directSlugsPT = generateSlugVariations(info.title, targetSeason, info.year);
     var directSlugsOriginal = [];
     if (info.originalTitle && info.originalTitle !== info.title) {
         directSlugsOriginal = generateSlugVariations(info.originalTitle, targetSeason, info.year);
     }
     var allDirectSlugs = directSlugsPT.concat(directSlugsOriginal);
+    log('getStreams direct slugs total', allDirectSlugs.length);
 
     var directUrls = [];
     var seenDirectUrls = {};
@@ -414,9 +501,12 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }
         }
     }
+    log('getStreams direct urls total', directUrls.length);
 
     for (var du = 0; du < directUrls.length; du++) {
+        log('getStreams testing direct', { n: du + 1, total: directUrls.length, url: directUrls[du].url });
         if (await testUrl(directUrls[du].url)) {
+            log('getStreams DIRECT HIT', directUrls[du].url);
             return [{
                 url: directUrls[du].url,
                 headers: HEADERS,
@@ -425,14 +515,17 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }];
         }
     }
+    log('getStreams direct guess failed');
 
-
+    // ─── PASSO 2: BUSCA NO DORAMOGO ───
+    log('getStreams STEP 2: SEARCH');
     var queries = [];
     var src = [info.title, info.originalTitle].concat(info.altTitles || []);
     for (var qi = 0; qi < src.length; qi++) {
         var t = (src[qi] || '').trim();
         if (t && queries.indexOf(t) === -1) queries.push(t);
     }
+    log('getStreams search queries', queries);
 
     var searchResults = [];
     var seenSearchSlugs = {};
@@ -441,22 +534,28 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         for (var r = 0; r < results.length; r++) {
             if (seenSearchSlugs[results[r].slug]) continue;
             if (!isStrictMatch(results[r].slug, expectedRoots, strongTokens)) {
+                log('getStreams slug rejected', results[r].slug);
                 continue;
             }
             seenSearchSlugs[results[r].slug] = 1;
             searchResults.push(results[r]);
         }
     }
-
+    log('getStreams search filtered', searchResults.length);
     if (searchResults.length === 0) {
-        return [];
+        log('getStreams no search results passed filter');
+        return makeDebugStream(info.title || 'Doramogo', 'No search results matched');
     }
 
+    // Score e ordena
     for (var s = 0; s < searchResults.length; s++) {
         searchResults[s]._score = scoreResult(searchResults[s].slug, info, expectedRoots, strongTokens, s);
+        log('getStreams score', { slug: searchResults[s].slug, score: searchResults[s]._score });
     }
     searchResults.sort(function(a, b) { return b._score - a._score; });
+    log('getStreams sorted', searchResults.map(function(r) { return { slug: r.slug, score: r._score }; }));
 
+    // Gera URLs dos top resultados e testa
     var searchUrls = [];
     var seenSearchUrls = {};
     var maxResultsToTry = Math.min(searchResults.length, 4);
@@ -477,25 +576,29 @@ async function getStreams(tmdbId, mediaType, season, episode) {
             }
         }
     }
+    log('getStreams search urls total', searchUrls.length);
 
     var seenStreamUrl = {};
     for (var su = 0; su < searchUrls.length; su++) {
+        log('getStreams testing search', { n: su + 1, total: searchUrls.length, url: searchUrls[su].url });
         if (seenStreamUrl[searchUrls[su].url]) {
+            log('getStreams dedup skip');
             continue;
         }
         seenStreamUrl[searchUrls[su].url] = 1;
         if (await testUrl(searchUrls[su].url)) {
+            log('getStreams SEARCH HIT', searchUrls[su].url);
             return [{
                 url: searchUrls[su].url,
                 headers: HEADERS,
-                name: 'Doramogo',
-                quality: 1080,
-                title: (mediaType === 'movie' ? info.title : info.title + ' S' + targetSeason + ' EP' + targetEpisode),
-        }];
+                name: 'Doramogo 1080p',
+                title: (mediaType === 'movie' ? info.title : info.title + ' S' + targetSeason + ' EP' + targetEpisode)
+            }];
         }
     }
 
-    return [];
+    log('getStreams ALL FAILED');
+    return makeDebugStream(info.title || 'Doramogo', 'All URLs failed (tested ' + directUrls.length + ' direct + ' + searchUrls.length + ' search)');
 }
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -503,4 +606,3 @@ if (typeof module !== 'undefined' && module.exports) {
 } else if (typeof global !== 'undefined') {
     global.getStreams = getStreams;
 }
-p
