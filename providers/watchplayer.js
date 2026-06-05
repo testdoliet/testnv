@@ -44,6 +44,19 @@ async function convertImdbToTmdb(imdbId, mediaType) {
   } catch { return null; }
 }
 
+async function getTMDBTitle(tmdbId, mediaType) {
+  try {
+    const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
+    const url = `${TMDB_BASE_URL}/${endpoint}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
+    const res = await fetch(url, { headers: { "User-Agent": getUA(), "Accept": "application/json" } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return mediaType === 'tv' ? data.name : data.title;
+  } catch {
+    return null;
+  }
+}
+
 async function detectQuality(m3u8Url) {
   try {
     const res = await fetch(m3u8Url, { headers: { "User-Agent": getUA() } });
@@ -72,6 +85,13 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
 
     const s = season || 1;
     const e = episode || 1;
+    
+    // Buscar título para formatação
+    const contentTitle = await getTMDBTitle(finalId, mediaType) || (mediaType === 'movie' ? 'Filme' : 'Série');
+    const displayTitle = mediaType === 'movie' 
+      ? contentTitle 
+      : `${contentTitle} S${String(s).padStart(2, '0')}E${String(e).padStart(2, '0')}`;
+
     const ajaxUrl = mediaType === "movie"
       ? `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=movie`
       : `https://playerflix.ink/pages/ajax.php?id=${finalId}&type=tv&season=${s}&episode=${e}`;
@@ -93,7 +113,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
       } catch {}
     }
 
-    // Stream 1: WatchPlayer
+    // WatchPlayer
     const wp = players.find(p => p.name === "WatchPlayer");
     if (wp && wp.url.includes("watchplayer.xyz")) {
       try {
@@ -136,12 +156,21 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
         }
         
         if (wUrl.includes('.m3u8') || wUrl.includes('/hls/')) {
-          streams.push({ name: "Stream 1", title: "720p", url: wUrl, quality: 720, type: "hls" });
+          streams.push({
+            name: "WatchPlayer",
+            title: displayTitle,
+            url: wUrl,
+            quality: 720,
+            size: "Unknown",
+            headers: {},
+            subtitles: [],
+            provider: "playerflix"
+          });
         }
       } catch {}
     }
 
-    // Stream 2: VIP Player
+    // VIP Player
     const vip = players.find(p => p.name === "VIP Player");
     if (vip) {
       try {
@@ -157,7 +186,16 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             const vipData = await vipRes.json();
             if (vipData.securedLink) {
               const q = await detectQuality(vipData.securedLink);
-              streams.push({ name: "Stream 2", title: q.label, url: vipData.securedLink, quality: q.value, type: "hls" });
+              streams.push({
+                name: "VIP Player",
+                title: displayTitle,
+                url: vipData.securedLink,
+                quality: q.value,
+                size: "Unknown",
+                headers: {},
+                subtitles: [],
+                provider: "playerflix"
+              });
             }
           }
         }
