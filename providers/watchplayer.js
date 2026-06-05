@@ -60,17 +60,17 @@ async function getTMDBTitle(tmdbId, mediaType) {
 async function detectQuality(m3u8Url) {
   try {
     const res = await fetch(m3u8Url, { headers: { "User-Agent": getUA() } });
-    if (!res.ok) return { label: "720p", value: 720 };
+    if (!res.ok) return { label: "720p", value: "720p"};
     const text = await res.text();
     let maxH = 0;
     text.split('\n').forEach(line => {
       const m = line.match(/RESOLUTION=\d+x(\d+)/);
       if (m) maxH = Math.max(maxH, parseInt(m[1]));
     });
-    if (maxH >= 1080) return { label: "1080p", value: 1080 };
-    if (maxH >= 720) return { label: "720p", value: 720 };
-    return { label: "480p", value: 480 };
-  } catch { return { label: "720p", value: 720 }; }
+    if (maxH >= 1080) return { label: "1080p", value: "1080p" };
+    if (maxH >= 720) return { label: "720p", value: "720p" };
+    return { label: "480p", value: "480p"};
+  } catch { return { label: "720p", value: "720p"}; }
 }
 
 async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
