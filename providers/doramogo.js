@@ -468,8 +468,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 url: searchUrls[su].url,
                 name: "Doramogo",
                 title: (mediaType === 'movie' ? info.title : info.title + ' S' + targetSeason + 'E' + targetEpisode),
-                quality: 1080,
-                size: "Unknown",
+                quality: '1080p',
                 headers: HEADERS,
                 subtitles: [],
                 provider: "doramogo"
