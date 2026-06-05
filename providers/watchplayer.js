@@ -160,8 +160,7 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
             name: "WatchPlayer",
             title: displayTitle,
             url: wUrl,
-            quality: 720,
-            size: "Unknown",
+            quality: '720p',
             headers: {},
             subtitles: [],
             provider: "playerflix"
@@ -191,7 +190,6 @@ async function getStreams(tmdbId, mediaType = "tv", season = 1, episode = 1) {
                 title: displayTitle,
                 url: vipData.securedLink,
                 quality: q.value,
-                size: "Unknown",
                 headers: {},
                 subtitles: [],
                 provider: "playerflix"
