@@ -487,8 +487,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
         name: "Pomfy",
         title: displayTitle, 
         url: decryptResult.url,
-        quality: 1080,
-        size: "Unknown",
+        quality: '1080p',
         headers: {},
         subtitles: [],
         provider: "pomfy"
