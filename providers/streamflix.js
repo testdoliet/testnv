@@ -29,6 +29,9 @@ const HEADERS = {
   "Upgrade-Insecure-Requests": "1"
 };
 
+const STREAM_HEADERS = {
+    'Referer': 'https://pomfy.online/'
+};
 const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function base64ToBytes(base64) {
@@ -331,21 +334,6 @@ async function convertImdbToTmdb(imdbId, mediaType) {
   } catch (error) { return { success: false, error: error.message }; }
 }
 
-async function getMediaDetails(tmdbId, mediaType) {
-  try {
-    const url = `${TMDB_BASE_URL}/${mediaType === 'tv' ? 'tv' : 'movie'}/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
-    const response = await fetch(url, { headers: { "User-Agent": USER_AGENT, "Accept": "application/json" } });
-    if (!response.ok) return null;
-    const data = await response.json();
-    return {
-      title: data.title || data.name || "Unknown Title",
-      originalTitle: data.original_title || data.original_name
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
 async function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
   const streams = [];
   
@@ -362,16 +350,6 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
 
   const seasonNum = mediaType === "movie" ? 1 : (season || 1);
   const episodeNum = mediaType === "movie" ? 1 : (episode || 1);
-
-  const mediaDetails = await getMediaDetails(finalTmdbId, mediaType);
-  const contentName = mediaDetails ? mediaDetails.title : (mediaType === 'movie' ? 'Filme' : 'Série');
-  
-  let displayTitle = contentName;
-  if (mediaType === 'tv') {
-    const s = String(seasonNum).padStart(2, '0');
-    const e = String(episodeNum).padStart(2, '0');
-    displayTitle = `${contentName} - S${s}E${e}`;
-  }
 
   try {
     const pomfyUrl = mediaType === "movie" ? `${API_POMFY}/filme/${finalTmdbId}` : `${API_POMFY}/serie/${finalTmdbId}/${seasonNum}/${episodeNum}`;
@@ -451,7 +429,7 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
         headers: { 'accept': '*/*', 'origin': playerDomain, 'referer': embedUrl, 'user-agent': USER_AGENT }
       });
     } catch (e) {
-      
+      // Ignora erro no challenge
     }
 
     const fingerprint = generateFingerprint();
@@ -485,12 +463,11 @@ async function getStreams(tmdbId, mediaType = "movie", season = null, episode = 
     if (decryptResult.success) {
       streams.push({
         name: "Pomfy",
-        title: displayTitle, 
+        title: "1080P",
+        headers: STREAM_HEADERS,
         url: decryptResult.url,
-        quality: '1080p',
-        headers: {},
-        subtitles: [],
-        provider: "pomfy"
+        quality: 1080,
+        type: "hls"
       });
       
       return streams;
