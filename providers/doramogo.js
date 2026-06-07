@@ -26,69 +26,69 @@ const NUMBER_MAP = {
 
 // Logger
 let debugLogs = [];
-let stepNumber = 0;
 
 function log(title, value = '') {
-    stepNumber++;
-    const logEntry = { step: stepNumber, title, value };
-    debugLogs.push(logEntry);
-    console.log(`[DEBUG ${stepNumber}] ${title}${value ? ': ' + value : ''}`);
+    debugLogs.push({ title, value });
+    console.log(`[*] ${title}${value ? ': ' + value : ''}`);
 }
 
 function clearLogs() {
     debugLogs = [];
-    stepNumber = 0;
 }
 
-function getLogs() {
-    return debugLogs;
+// FUNÇÃO PARA MOSTRAR STREAMS IGUAL AO RETORNO FINAL
+function debugStream(stream, stage) {
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`📺 STREAM (${stage})`);
+    console.log(`${'='.repeat(80)}`);
+    console.log(`{
+  name: "${stream.name}",
+  title: "${stream.title}",
+  url: "${stream.url}",
+  quality: "${stream.quality}",
+  headers: {
+    "User-Agent": "${stream.headers?.['User-Agent'] || HEADERS['User-Agent']}",
+    "Referer": "${stream.headers?.['Referer'] || HEADERS['Referer']}"
+  }
+}`);
+    console.log(`${'='.repeat(80)}\n`);
 }
 
-function logStreams(streams, stage) {
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`📊 STREAMS NO ESTÁGIO: ${stage}`);
-    console.log(`${'='.repeat(60)}`);
-    
+function debugStreamsArray(streams, stage) {
     if (!streams || streams.length === 0) {
-        console.log(`❌ Nenhum stream disponível no estágio: ${stage}`);
+        console.log(`\n❌ NENHUM STREAM (${stage})\n`);
         return;
     }
     
-    console.log(`📈 Total de streams: ${streams.length}`);
-    streams.forEach((stream, index) => {
-        console.log(`\n  Stream #${index + 1}:`);
-        console.log(`    ├─ Nome: ${stream.name}`);
-        console.log(`    ├─ Título: ${stream.title}`);
-        console.log(`    ├─ URL: ${stream.url.substring(0, 120)}...`);
-        console.log(`    ├─ Qualidade: ${stream.quality}`);
-        console.log(`    ├─ Testado: ${stream.tested || 'não'}`);
-        console.log(`    └─ Funcionando: ${stream.working || 'desconhecido'}`);
+    console.log(`\n${'='.repeat(80)}`);
+    console.log(`📦 ${streams.length} STREAM(S) (${stage})`);
+    console.log(`${'='.repeat(80)}`);
+    
+    streams.forEach((stream, i) => {
+        console.log(`\n[${i + 1}]`);
+        console.log(`  name: "${stream.name}"`);
+        console.log(`  title: "${stream.title}"`);
+        console.log(`  url: "${stream.url}"`);
+        console.log(`  quality: "${stream.quality}"`);
+        console.log(`  headers: { "User-Agent": "${stream.headers?.['User-Agent'] || HEADERS['User-Agent']}", "Referer": "${stream.headers?.['Referer'] || HEADERS['Referer']}" }`);
     });
     
-    console.log(`${'='.repeat(60)}\n`);
+    console.log(`\n${'='.repeat(80)}\n`);
 }
 
 function normalizeForComparison(text) {
     if (!text) return "";
     
     let normalized = text.toLowerCase();
-    
-    // Remove acentos
     normalized = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    
-    // Remove dublado/legendado/online/hd/etc
     normalized = normalized.replace(/\b(dublado|legendado|online|hd|4k|completo|dual|audio)\b/g, '');
     
-    // Substituir números ordinais e comuns
     for (const [num, word] of Object.entries(NUMBER_MAP)) {
         const regex = new RegExp(`\\b${num}\\b`, 'gi');
         normalized = normalized.replace(regex, ` ${word} `);
     }
     
-    // Remove caracteres especiais
     normalized = normalized.replace(/[^a-z0-9\s]/g, ' ');
-    
-    // Remove espaços extras
     normalized = normalized.replace(/\s+/g, ' ').trim();
     
     return normalized;
@@ -161,8 +161,6 @@ function generateSlugVariations(baseTitle, season, ano) {
             if (ano) add(`${base}-${ano}-${season}`);
         }
     });
-    
-    log(`Slugs gerados para "${baseTitle}": ${variations.length} variações`);
     return variations;
 }
 
@@ -212,7 +210,6 @@ async function getAnilistTitles(title, airDateStr) {
                     if (diff < minDiff) {
                         minDiff = diff;
                         bestEntry = cand;
-                        log(`Melhor candidato AniList até agora: ${cand.title?.romaji} (diff: ${diff}ms)`);
                     }
                 }
             } catch (e) {}
@@ -223,40 +220,22 @@ async function getAnilistTitles(title, airDateStr) {
             log(`AniList encontrado: ${titles[0]}`);
             return titles;
         }
-    } catch (e) {
-        log(`Erro no AniList: ${e.message}`);
-    }
+    } catch (e) {}
     
     return [];
 }
 
-async function testUrl(url, context = '') {
-    log(`Testando URL${context ? ` (${context})` : ''}: ${url.substring(0, 100)}...`);
-    
+async function testUrl(url) {
     try {
         const response = await fetch(url, { method: 'HEAD', headers: HEADERS });
-        const isValid = response.ok || response.status === 206;
-        
-        if (isValid) {
-            log(`✓ URL válida! Status: ${response.status}`);
-        } else {
-            log(`✗ URL inválida. Status: ${response.status}`);
-        }
-        
-        return isValid;
+        return response.ok || response.status === 206;
     } catch (err) {
-        log(`✗ Erro ao testar URL: ${err.message}`);
         return false;
     }
 }
 
 async function fetchProxies() {
-    if (cachedProxies && Date.now() < proxyExpiry) {
-        log(`Usando proxies em cache: ${JSON.stringify(cachedProxies)}`);
-        return cachedProxies;
-    }
-    
-    log(`Buscando proxies de ${PROXY_SOURCE_URL}...`);
+    if (cachedProxies && Date.now() < proxyExpiry) return cachedProxies;
     
     try {
         const res = await fetch(PROXY_SOURCE_URL);
@@ -270,11 +249,8 @@ async function fetchProxies() {
             fallback: fallbackMatch ? fallbackMatch[1] : 'https://forks-doramas.netflxx.shop' 
         };
         proxyExpiry = Date.now() + PROXY_CACHE_TIME;
-        
-        log(`Proxies obtidos: PRIMARY=${cachedProxies.primary}, FALLBACK=${cachedProxies.fallback}`);
         return cachedProxies;
     } catch (e) {
-        log(`Erro ao buscar proxies: ${e.message}`);
         return null;
     }
 }
@@ -283,57 +259,44 @@ async function fetchProxies() {
 
 async function getStreams(tmdbId, mediaType, season, episode) {
     clearLogs();
-    log(`🚀 INICIANDO BUSCA DE STREAMS`);
-    log(`📝 Parâmetros: tmdbId=${tmdbId}, mediaType=${mediaType}, season=${season}, episode=${episode}`);
+    
+    log(`Tipo: ${mediaType}`);
+    log(`ID TMDB: ${tmdbId}`);
     
     let airDate = null;
     
     if (mediaType === 'tv') {
-        log(`📺 Buscando episódio S${season}E${episode}`);
+        log(`Temporada: ${season}, Episódio: ${episode}`);
         
         const epUrl = `${TMDB_BASE_URL}/tv/${tmdbId}/season/${season}/episode/${episode}?api_key=${TMDB_API_KEY}`;
-        log(`🌐 Requisição TMDB: ${epUrl}`);
-        
         const epRes = await (await fetch(epUrl)).json();
         airDate = epRes.air_date;
-        log(`📅 Data de exibição do episódio: ${airDate}`);
         
         var tmdbUrl = `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
     } else {
         var tmdbUrl = `${TMDB_BASE_URL}/movie/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
     }
     
-    log(`🌐 Buscando informações da série/filme: ${tmdbUrl}`);
-    
     const tvRes = await (await fetch(tmdbUrl)).json();
     const namePt = tvRes.name || tvRes.title;
     const nameOrig = tvRes.original_name || tvRes.original_title;
     const year = (tvRes.first_air_date || tvRes.release_date || "").substring(0, 4);
     
-    log(`📺 TMDB: ${namePt} (${nameOrig}) - ${year}`);
-    log(`🌍 Idioma original: ${tvRes.original_language}`);
+    log(`TMDB: ${namePt} (${year})`);
     
-    // Buscar proxies
     const proxies = await fetchProxies() || { primary: 'https://ondemand.netflxx.shop', fallback: 'https://forks-doramas.netflxx.shop' };
     const cdnList = [proxies.primary, proxies.fallback];
-    log(`📡 CDNs disponíveis: ${cdnList.join(', ')}`);
     
     const epPadded = episode.toString().padStart(2, '0');
     const seasonPadded = season.toString().padStart(2, '0');
     const timestamp = Date.now();
-    log(`🔢 Episódio formatado: ${epPadded}, Temporada formatada: ${seasonPadded}`);
     
     // ============================================
-    // PASSO 1: DIRECT GUESS (Doramogo)
+    // PASSO 1: DIRECT GUESS
     // ============================================
-    log(`\n${'🔍'.repeat(20)}`);
-    log(`PASSO 1: DIRECT GUESS no Doramogo`);
-    log(`${'🔍'.repeat(20)}`);
+    log("Tentando Direct Guess...");
     
     const guessSlugs = generateSlugVariations(namePt, season, year);
-    log(`Geradas ${guessSlugs.length} variações de slug para teste direto`);
-    
-    let directStreams = [];
     
     for (const slug of guessSlugs) {
         const firstLetter = slug.charAt(0).toUpperCase();
@@ -345,145 +308,91 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 url = `${cdn}/${firstLetter}/${slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
             }
             
-            log(`Testando slug: ${slug} no CDN: ${cdn}`);
-            
-            if (await testUrl(url, 'Direct Guess')) {
+            if (await testUrl(url)) {
                 const label = slug.includes('-dublado') ? "Dublado" : "Legendado";
-                log(`✨ DIRECT GUESS ENCONTRADO! Slug: ${slug} (${label})`);
-                
                 const stream = {
                     name: `Doramogo [${label}]`,
                     title: `${namePt} (${label})`,
                     url: url,
                     quality: '1080p',
-                    headers: HEADERS,
-                    tested: true,
-                    working: true
+                    headers: HEADERS
                 };
                 
-                directStreams.push(stream);
-                logStreams(directStreams, 'DIRECT GUESS - RESULTADO');
-                return directStreams;
+                // DEBUG DO STREAM IGUAL AO RETORNO FINAL
+                debugStream(stream, "DIRECT GUESS - RETORNANDO");
+                
+                return [stream];
             }
         }
     }
     
-    log(`❌ Direct Guess falhou. Nenhum slug direto funcionou.`);
+    log("Direct Guess falhou, iniciando busca no Megacine...");
     
     // ============================================
-    // PASSO 2: Busca no Megacine com similaridade
+    // PASSO 2: Busca no Megacine
     // ============================================
-    log(`\n${'🔍'.repeat(20)}`);
-    log(`PASSO 2: BUSCA NO MEGACINE COM SIMILARIDADE`);
-    log(`${'🔍'.repeat(20)}`);
     
     let aniTitles = [];
     if (mediaType === 'tv' && tvRes.original_language === 'ja') {
-        log(`🎌 Anime detectado! Buscando títulos no AniList...`);
         aniTitles = await getAnilistTitles(nameOrig, airDate);
     }
     
     let finalTargets = [];
     if (aniTitles.length > 0) {
         finalTargets = aniTitles;
-        log(`📋 Usando títulos do AniList como alvos: ${finalTargets.join(', ')}`);
     } else {
         finalTargets = [namePt];
-        log(`📋 Usando título TMDB como alvo: ${finalTargets.join(', ')}`);
     }
     
-    // Normalizar alvos para comparação
     const normalizedTargets = finalTargets.map(t => normalizeForComparison(t));
-    log(`📊 Alvos normalizados: ${normalizedTargets.join(', ')}`);
+    log(`Alvos de Similitude: ${normalizedTargets.join(', ')}`);
     
-    // Buscar no Megacine
     const searchUrl = `${MEGACINE_BASE}/search/?q=${encodeURIComponent(namePt)}`;
-    log(`🌐 Buscando no Megacine: ${searchUrl}`);
-    
     const html = await (await fetch(searchUrl, { headers: HEADERS })).text();
-    log(`📄 HTML recebido: ${html.length} bytes`);
     
-    // Regex para encontrar resultados
     const regex = /href="https:\/\/www\.megacine\.online\/(series|filmes)\/([^"]+)".*?card-title">([^<]+)<\/h3>/gs;
     
     let match;
     const candidates = [];
-    let matchCount = 0;
-    
-    log(`🔎 Analisando resultados da busca...`);
     
     while ((match = regex.exec(html)) !== null) {
-        matchCount++;
         const [_, siteType, slug, display] = match;
         
-        log(`📌 Resultado #${matchCount}: ${slug} - "${display}"`);
-        
-        // Primeiro, remover dublado/legendado do slug para comparação
         let slugForComparison = slug.replace(/-(dublado|legendado)$/, '');
-        slugForComparison = slugForComparison.replace(/-\d{4}$/, ''); // Remove ano
+        slugForComparison = slugForComparison.replace(/-\d{4}$/, '');
         slugForComparison = slugForComparison.replace(/-/g, ' ');
         
-        // Normalizar slug e display
         const normSlug = normalizeForComparison(slugForComparison);
         const normDisplay = normalizeForComparison(display);
         
-        log(`  🔄 Slug normalizado: "${normSlug}"`);
-        log(`  🔄 Display normalizado: "${normDisplay}"`);
-        
-        // Calcular melhor similaridade
         let bestSim = 0;
-        let bestTarget = '';
-        
         for (const target of normalizedTargets) {
-            const simSlug = levenshteinRatio(normSlug, target);
-            const simDisplay = levenshteinRatio(normDisplay, target);
-            const sim = Math.max(simSlug, simDisplay);
-            
-            log(`  📊 Similaridade com "${target}": slug=${(simSlug*100).toFixed(2)}%, display=${(simDisplay*100).toFixed(2)}%, max=${(sim*100).toFixed(2)}%`);
-            
-            if (sim > bestSim) {
-                bestSim = sim;
-                bestTarget = target;
-            }
+            const sim = Math.max(
+                levenshteinRatio(normSlug, target),
+                levenshteinRatio(normDisplay, target)
+            );
+            if (sim > bestSim) bestSim = sim;
         }
         
-        log(`  🏆 Melhor similaridade: ${(bestSim * 100).toFixed(2)}% com alvo "${bestTarget}"`);
-        
-        // Aceitar com 95%+
         if (bestSim >= 0.95) {
-            candidates.push({
-                slug: slug,
-                display: display,
-                similarity: bestSim,
-                type: siteType
-            });
-            log(`  ✅ Candidato ACEITO! (similaridade: ${(bestSim * 100).toFixed(2)}%)`);
-        } else {
-            log(`  ❌ Candidato REJEITADO (similaridade abaixo de 95%)`);
+            candidates.push({ slug, display, similarity: bestSim });
+            log(`✓ Candidato aceito: ${slug} (${(bestSim * 100).toFixed(2)}%)`);
         }
     }
     
-    log(`📊 Total de candidatos aceitos: ${candidates.length}/${matchCount}`);
-    
     if (candidates.length === 0) {
-        log(`❌ Nenhum candidato com 95%+ de similaridade`);
+        log("❌ Nenhum candidato com 95%+ de similaridade");
         return [];
     }
     
     // ============================================
-    // PASSO 3: Testar URLs dos candidatos
+    // PASSO 3: Testar URLs e criar streams
     // ============================================
-    log(`\n${'🔍'.repeat(20)}`);
-    log(`PASSO 3: TESTANDO URLs DOS CANDIDATOS`);
-    log(`${'🔍'.repeat(20)}`);
+    log("Testando URLs dos candidatos...");
     
     const validStreams = [];
     
     for (const cand of candidates) {
-        log(`\n📦 Testando candidato: ${cand.slug}`);
-        log(`   Display: ${cand.display}`);
-        log(`   Similaridade: ${(cand.similarity * 100).toFixed(2)}%`);
-        
         const firstLetter = cand.slug.charAt(0).toUpperCase();
         
         for (const cdn of cdnList) {
@@ -494,9 +403,7 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 url = `${cdn}/${firstLetter}/${cand.slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
             }
             
-            log(`  🌐 Testando URL no CDN ${cdn}: ${url.substring(0, 100)}...`);
-            
-            if (await testUrl(url, `Candidato ${cand.slug}`)) {
+            if (await testUrl(url)) {
                 const isDubbed = cand.slug.includes('-dublado');
                 const isSubbed = cand.slug.includes('-legendado');
                 let label = "";
@@ -508,49 +415,39 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                     title: `${cand.display}${label ? ` (${label})` : ''}`,
                     url: url,
                     quality: '1080p',
-                    headers: HEADERS,
-                    tested: true,
-                    working: true
+                    headers: HEADERS
                 };
                 
                 validStreams.push(stream);
-                log(`  ✅ URL VÁLIDA! Stream adicionado: ${stream.name}`);
+                log(`✓ URL válida: ${cand.slug}`);
+                
+                // DEBUG DO STREAM INDIVIDUAL
+                debugStream(stream, `CANDIDATO VÁLIDO - ${cand.slug}`);
             }
         }
     }
     
-    logStreams(validStreams, 'APÓS TESTE DE URL');
-    
     if (validStreams.length === 0) {
-        log("❌ Nenhuma URL válida encontrada após testes");
+        log("❌ Nenhuma URL válida encontrada");
         return [];
     }
     
-    // ============================================
-    // PASSO 4: Agrupar por slug base e aplicar lógica de dublado/legendado
-    // ============================================
-    log(`\n${'🔍'.repeat(20)}`);
-    log(`PASSO 4: AGRUPANDO POR SLUG BASE`);
-    log(`${'🔍'.repeat(20)}`);
+    // DEBUG DE TODOS OS STREAMS VÁLIDOS ANTES DO AGRUPAMENTO
+    debugStreamsArray(validStreams, "STREAMS VÁLIDOS (ANTES DO AGRUPAMENTO)");
     
+    // ============================================
+    // PASSO 4: Agrupar e aplicar lógica
+    // ============================================
     const slugMap = new Map();
     
     for (const stream of validStreams) {
-        // Extrair o slug da URL
         const urlParts = stream.url.split('/');
         const slugIndex = urlParts.findIndex(part => part === 'S' || part === 'T') + 1;
         const slug = urlParts[slugIndex];
         
-        log(`📦 Processando stream: ${stream.name}`);
-        log(`   URL: ${stream.url.substring(0, 100)}...`);
-        log(`   Slug extraído: ${slug}`);
-        
         const baseSlug = slug.replace(/-(dublado|legendado)$/, '');
         const type = slug.includes('-dublado') ? 'dublado' : 
                      (slug.includes('-legendado') ? 'legendado' : 'indefinido');
-        
-        log(`   Base slug: ${baseSlug}`);
-        log(`   Tipo: ${type}`);
         
         if (!slugMap.has(baseSlug)) {
             slugMap.set(baseSlug, {
@@ -558,66 +455,37 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 variants: {},
                 display: stream.title
             });
-            log(`   🆕 Novo grupo criado para: ${baseSlug}`);
         }
         
         slugMap.get(baseSlug).variants[type] = stream;
-        log(`   ➕ Stream adicionado ao grupo ${baseSlug} como ${type}`);
     }
     
-    log(`\n📊 Grupos identificados: ${slugMap.size}`);
-    for (const [baseSlug, data] of slugMap) {
-        log(`   📁 Grupo "${baseSlug}": variantes = ${Object.keys(data.variants).join(', ')}`);
-    }
-    
-    // Construir streams finais
     const finalStreams = [];
     
     for (const [baseSlug, data] of slugMap) {
         const variants = data.variants;
         
-        log(`\n📦 Processando grupo: ${baseSlug}`);
-        log(`   Variantes disponíveis: ${Object.keys(variants).join(', ')}`);
-        
-        // Caso 1: Tem dublado E legendado
         if (variants.dublado && variants.legendado) {
-            log(`   ✅ Caso 1: Tem DUBLADO e LEGENDADO - adicionando ambos`);
+            log(`✓ Adicionando DUBLADO e LEGENDADO para: ${baseSlug}`);
             finalStreams.push(variants.dublado, variants.legendado);
-        }
-        // Caso 2: Só dublado
-        else if (variants.dublado && !variants.legendado) {
-            log(`   ✅ Caso 2: Apenas DUBLADO - adicionando apenas dublado`);
+        } else if (variants.dublado && !variants.legendado) {
+            log(`✓ Adicionando apenas DUBLADO para: ${baseSlug}`);
             finalStreams.push(variants.dublado);
-        }
-        // Caso 3: Só legendado
-        else if (variants.legendado && !variants.dublado) {
-            log(`   ✅ Caso 3: Apenas LEGENDADO - adicionando apenas legendado`);
+        } else if (variants.legendado && !variants.dublado) {
+            log(`✓ Adicionando apenas LEGENDADO para: ${baseSlug}`);
             finalStreams.push(variants.legendado);
-        }
-        // Caso 4: Indefinido
-        else if (variants.indefinido) {
-            log(`   ✅ Caso 4: Sem especificação - adicionando sem label`);
+        } else if (variants.indefinido) {
+            log(`✓ Adicionando versão SEM ESPECIFICAÇÃO para: ${baseSlug}`);
             finalStreams.push(variants.indefinido);
         }
     }
     
-    logStreams(finalStreams, '🎉 RESULTADO FINAL');
+    // DEBUG FINAL DOS STREAMS IGUAL AO RETORNO
+    debugStreamsArray(finalStreams, "🎉 RESULTADO FINAL - STREAMS RETORNADOS");
     
     log(`✅ Total de streams gerados: ${finalStreams.length}`);
-    
-    // Mostrar resumo dos streams
-    console.log(`\n${'🎬'.repeat(30)}`);
-    console.log(`RESUMO FINAL DOS STREAMS ENCONTRADOS`);
-    console.log(`${'🎬'.repeat(30)}`);
-    finalStreams.forEach((s, i) => {
-        console.log(`\n  ${i+1}. ${s.name}`);
-        console.log(`     Título: ${s.title}`);
-        console.log(`     URL: ${s.url.substring(0, 100)}...`);
-        console.log(`     Qualidade: ${s.quality}`);
-    });
-    console.log(`\n${'🎬'.repeat(30)}\n`);
     
     return finalStreams;
 }
 
-module.exports = { getStreams, getLogs, clearLogs };
+module.exports = { getStreams };
