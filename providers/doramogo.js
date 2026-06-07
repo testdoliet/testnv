@@ -1,5 +1,6 @@
 const TMDB_API_KEY = 'b64d2f3a4212a99d64a7d4485faed7b3';
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
+const MEGACINE_BASE = 'https://www.megacine.online';
 const DORAMOGO_BASE = 'https://www.doramogo.net';
 const PROXY_SOURCE_URL = DORAMOGO_BASE + '/series/dream-stage-2026-legendado/temporada-1/episodio-1';
 
@@ -13,469 +14,470 @@ let cachedProxies = null;
 let proxyExpiry = 0;
 const PROXY_CACHE_TIME = 60 * 60 * 1000;
 
-const STOPWORDS = {
-    a: 1, o: 1, os: 1, as: 1, de: 1, do: 1, da: 1, dos: 1, das: 1,
-    the: 1, of: 1, and: 1, e: 1, no: 1, na: 1, nos: 1, nas: 1,
-    to: 1, in: 1, on: 1, at: 1, for: 1, ni: 1, wa: 1, ga: 1, wo: 1, ka: 1,
-    em: 1, um: 1, uma: 1, que: 1, com: 1, por: 1, se: 1, mas: 1
+// Mapeamento de números para comparação
+const NUMBER_MAP = {
+    '1st': 'first', '2nd': 'second', '3rd': 'third', '4th': 'fourth', '5th': 'fifth',
+    '6th': 'sixth', '7th': 'seventh', '8th': 'eighth', '9th': 'ninth', '10th': 'tenth',
+    '11th': 'eleventh', '12th': 'twelfth',
+    '1': 'one', '2': 'two', '3': 'three', '4': 'four', '5': 'five',
+    '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine', '10': 'ten',
+    '11': 'eleven', '12': 'twelve'
 };
 
-function normalize(str) {
-    if (!str) return '';
-    return str.toLowerCase()
-        .replace(/[áàâãä]/g, 'a')
-        .replace(/[éèêë]/g, 'e')
-        .replace(/[íìîï]/g, 'i')
-        .replace(/[óòôõö]/g, 'o')
-        .replace(/[úùûü]/g, 'u')
-        .replace(/[ç]/g, 'c')
-        .replace(/[ñ]/g, 'n')
-        .replace(/[:：]/g, ' ')
-        .replace(/[^a-z0-9\s-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+// Logger
+let debugLogs = [];
+
+function log(title, value = '') {
+    debugLogs.push({ title, value });
+    console.log(`[*] ${title}${value ? ': ' + value : ''}`);
 }
 
-function slugify(str) {
-    return normalize(str).replace(/\s+/g, '-');
+function clearLogs() {
+    debugLogs = [];
 }
 
-function tokensOf(title, minLen) {
-    if (!minLen) minLen = 3;
-    return normalize(title)
-        .split(' ')
-        .filter(function (w) { return w && !STOPWORDS[w] && w.length >= minLen; });
+function normalizeForComparison(text) {
+    if (!text) return "";
+    
+    let normalized = text.toLowerCase();
+    
+    // Remove acentos
+    normalized = normalized.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    
+    // Remove dublado/legendado/online/hd/etc
+    normalized = normalized.replace(/\b(dublado|legendado|online|hd|4k|completo|dual|audio)\b/g, '');
+    
+    // Substituir números ordinais e comuns
+    for (const [num, word] of Object.entries(NUMBER_MAP)) {
+        const regex = new RegExp(`\\b${num}\\b`, 'gi');
+        normalized = normalized.replace(regex, ` ${word} `);
+    }
+    
+    // Remove caracteres especiais
+    normalized = normalized.replace(/[^a-z0-9\s]/g, ' ');
+    
+    // Remove espaços extras
+    normalized = normalized.replace(/\s+/g, ' ').trim();
+    
+    return normalized;
 }
 
-function slugBody(slug) {
-    return slug
-        .replace(/-dublado$/, '')
-        .replace(/-legendado$/, '')
-        .replace(/-online$/, '')
-        .replace(/-[0-9]{4}$/, '')
-        .replace(/-s\d+$/, '');
-}
-
-function stripListSuffix(slug) {
-    return slug
-        .replace(/-todos-os-episodios$/, '')
-        .replace(/-todos-episodios$/, '');
-}
-
-function buildExpectedRoots(tmdbInfo) {
-    var titles = [tmdbInfo.title, tmdbInfo.originalTitle]
-        .concat(tmdbInfo.altTitles || [])
-        .filter(Boolean);
-    var roots = [];
-    var seen = {};
-    function push(s) { if (s && !seen[s]) { seen[s] = 1; roots.push(s); } }
-    for (var i = 0; i < titles.length; i++) {
-        var base = slugify(titles[i]);
-        if (!base) continue;
-        push(base);
-        push(base.replace(/^the-/, ''));
-        var afterColon = titles[i].indexOf(':') !== -1
-            ? titles[i].split(':').slice(1).join(':')
-            : '';
-        if (afterColon) {
-            var slug = slugify(afterColon);
-            if (slug) push(slug);
+function levenshteinRatio(s1, s2) {
+    if (!s1 || !s2) return 0;
+    if (s1 === s2) return 1.0;
+    
+    const len1 = s1.length;
+    const len2 = s2.length;
+    
+    const matrix = Array(len1 + 1);
+    for (let i = 0; i <= len1; i++) {
+        matrix[i] = Array(len2 + 1);
+        matrix[i][0] = i;
+    }
+    for (let j = 0; j <= len2; j++) {
+        matrix[0][j] = j;
+    }
+    
+    for (let i = 1; i <= len1; i++) {
+        for (let j = 1; j <= len2; j++) {
+            const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+            matrix[i][j] = Math.min(
+                matrix[i - 1][j] + 1,
+                matrix[i][j - 1] + 1,
+                matrix[i - 1][j - 1] + cost
+            );
         }
     }
-    return roots;
-}
-
-function buildStrongTokens(info) {
-    var source = [info.title, info.originalTitle].concat(info.altTitles || []);
-    var seen = {};
-    var out = [];
-    for (var si = 0; si < source.length; si++) {
-        var toks = tokensOf(source[si], 4);
-        for (var ti = 0; ti < toks.length; ti++) {
-            if (!seen[toks[ti]]) { seen[toks[ti]] = 1; out.push(toks[ti]); }
-        }
-    }
-    return out;
-}
-
-function isStrictMatch(slug, expectedRoots, strongTokens) {
-    if (!slug) return false;
-    var body = slugBody(stripListSuffix(slug));
-
-    for (var i = 0; i < expectedRoots.length; i++) {
-        var root = expectedRoots[i];
-        if (!root) continue;
-        if (body === root) return true;
-        if (body.indexOf(root + '-') === 0) return true;
-    }
-
-    for (var j = 0; j < expectedRoots.length; j++) {
-        var r2 = expectedRoots[j];
-        if (!r2 || r2.length < 6) continue;
-        if (body.indexOf('-' + r2 + '-') !== -1) return true;
-        if (body.length > r2.length && body.substring(body.length - r2.length - 1) === '-' + r2) return true;
-    }
-
-    if (strongTokens && strongTokens.length >= 2) {
-        var hits = 0;
-        for (var k = 0; k < strongTokens.length; k++) {
-            if (body.indexOf(strongTokens[k]) !== -1) hits++;
-        }
-        var needed = Math.max(2, Math.ceil(strongTokens.length * 0.5));
-        if (hits >= needed) return true;
-    }
-
-    return false;
-}
-
-function scoreResult(slug, tmdbInfo, expectedRoots, strongTokens, index) {
-    var score = 0;
-    var body = slugBody(stripListSuffix(slug));
-
-    for (var i = 0; i < expectedRoots.length; i++) {
-        var root = expectedRoots[i];
-        if (!root) continue;
-        if (body === root) { score += 100; break; }
-        if (body.indexOf(root + '-') === 0) { score += 90; break; }
-        if (body.indexOf('-' + root + '-') !== -1) score += 70;
-    }
-
-    if (tmdbInfo.year && slug.indexOf(tmdbInfo.year) !== -1) score += 20;
-    if (slug.indexOf('-legendado') !== -1) score += 10;
-    if (slug.indexOf('-dublado') !== -1) score += 8;
-    score += Math.max(0, 5 - (index || 0));
-
-    return score;
-}
-
-const NUMBER_WORDS = {
-    '0': 'zero', '1': 'um', '2': 'dois', '3': 'tres',
-    '4': 'quatro', '5': 'cinco', '6': 'seis',
-    '7': 'sete', '8': 'oito', '9': 'nove', '10': 'dez'
-};
-
-function numberToWords(numStr) {
-    return numStr.split('').map(function(d) { return NUMBER_WORDS[d] || d; }).join('-');
+    
+    const distance = matrix[len1][len2];
+    return 1.0 - (distance / Math.max(len1, len2));
 }
 
 function titleToSlug(title, convertNumbers) {
     if (!title) return '';
-    var processed = title;
+    let text = title.toLowerCase();
+    
     if (convertNumbers) {
-        processed = title.replace(/\d+/g, function(match) { return numberToWords(match); });
+        const numMap = {'0':'zero','1':'um','2':'dois','3':'tres','4':'quatro','5':'cinco','6':'seis','7':'sete','8':'oito','9':'nove'};
+        text = text.replace(/\d/g, m => numMap[m] || m);
     }
-    return processed.toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    
+    return text.normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '');
 }
 
-async function fetchText(url, opts) {
-    if (!opts) opts = {};
+function generateSlugVariations(baseTitle, season, ano) {
+    const variations = [];
+    const seen = new Set();
+    const slugBases = [titleToSlug(baseTitle, false), titleToSlug(baseTitle, true)];
+    
+    const add = (s) => { if (!seen.has(s)) { seen.add(s); variations.push(s); } };
+
+    slugBases.forEach(base => {
+        add(base);
+        if (ano) add(`${base}-${ano}`);
+        add(`${base}-legendado`);
+        add(`${base}-dublado`);
+        if (ano) {
+            add(`${base}-${ano}-legendado`);
+            add(`${base}-${ano}-dublado`);
+        }
+        if (season > 1) {
+            add(`${base}-${season}`);
+            if (ano) add(`${base}-${ano}-${season}`);
+        }
+    });
+    return variations;
+}
+
+async function getAnilistTitles(title, airDateStr) {
+    if (!airDateStr) return [];
+    
+    log(`Sincronizando data (${airDateStr}) com AniList...`);
+    
+    const targetDt = new Date(airDateStr);
+    const query = `query ($search: String) {
+        Page(perPage: 15) { media(search: $search, type: ANIME) {
+            title { romaji english }
+            startDate { year month day }
+            relations { edges { node { title { romaji english } startDate { year month day } } relationType } }
+        } }
+    }`;
+    
     try {
-        var r = await fetch(url, {
-            method: opts.method || 'GET',
-            redirect: 'follow',
-            headers: Object.assign({
-                'User-Agent': HEADERS['User-Agent'],
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'pt-BR,pt;q=0.9',
-                'Referer': HEADERS['Referer']
-            }, opts.headers || {})
+        const response = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, variables: { search: title } })
         });
-        return { status: r.status, text: await r.text() };
-    } catch (e) {
-        return { status: -1, text: '' };
-    }
+        
+        const data = await response.json();
+        const media = data.data?.Page?.media || [];
+        
+        const allEntries = [];
+        for (const entry of media) {
+            allEntries.push(entry);
+            for (const edge of entry.relations?.edges || []) {
+                allEntries.push(edge.node);
+            }
+        }
+        
+        let bestEntry = null;
+        let minDiff = Infinity;
+        
+        for (const cand of allEntries) {
+            const sd = cand.startDate;
+            if (!sd || !sd.year) continue;
+            
+            try {
+                const startDt = new Date(sd.year, (sd.month || 1) - 1, sd.day || 1);
+                if (startDt <= targetDt) {
+                    const diff = targetDt - startDt;
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        bestEntry = cand;
+                    }
+                }
+            } catch (e) {}
+        }
+        
+        if (bestEntry) {
+            const titles = [bestEntry.title.romaji, bestEntry.title.english].filter(Boolean);
+            log(`AniList encontrado: ${titles[0]}`);
+            return titles;
+        }
+    } catch (e) {}
+    
+    return [];
 }
 
 async function testUrl(url) {
     try {
-        var response = await fetch(url, { method: 'HEAD', headers: HEADERS });
-        return response.ok || response.status === 206;
+        const response = await fetch(url, { method: 'HEAD', headers: HEADERS });
+        const isValid = response.ok || response.status === 206;
+        if (isValid) {
+            console.log(`  ✓ URL válida: ${url.substring(0, 100)}...`);
+        }
+        return isValid;
     } catch (err) {
         return false;
     }
 }
 
 async function fetchProxies() {
-    if (cachedProxies && Date.now() < proxyExpiry) {
-        return cachedProxies;
-    }
+    if (cachedProxies && Date.now() < proxyExpiry) return cachedProxies;
+    
     try {
-        var res = await fetchText(PROXY_SOURCE_URL, { headers: HEADERS });
-        if (!res || res.status !== 200) return null;
-        var primaryMatch = res.text.match(/const\s+PRIMARY_URL\s*=\s*['"]([^'"]+)['"]/);
-        var fallbackMatch = res.text.match(/const\s+FALLBACK_URL\s*=\s*['"]([^'"]+)['"]/);
-        var proxies = {
-            primary: primaryMatch ? primaryMatch[1] : 'https://ondemand.netflxx.shop',
-            fallback: fallbackMatch ? fallbackMatch[1] : 'https://forks-doramas.netflxx.shop'
+        const res = await fetch(PROXY_SOURCE_URL);
+        const text = await res.text();
+        
+        const primaryMatch = text.match(/const\s+PRIMARY_URL\s*=\s*['"]([^'"]+)['"]/);
+        const fallbackMatch = text.match(/const\s+FALLBACK_URL\s*=\s*['"]([^'"]+)['"]/);
+        
+        cachedProxies = { 
+            primary: primaryMatch ? primaryMatch[1] : 'https://ondemand.netflxx.shop', 
+            fallback: fallbackMatch ? fallbackMatch[1] : 'https://forks-doramas.netflxx.shop' 
         };
-        cachedProxies = proxies;
         proxyExpiry = Date.now() + PROXY_CACHE_TIME;
-        return proxies;
-    } catch (err) {
+        return cachedProxies;
+    } catch (e) {
         return null;
     }
 }
 
-async function convertImdbToTmdb(imdbId, mediaType) {
-    try {
-        var url = TMDB_BASE_URL + '/find/' + imdbId + '?api_key=' + TMDB_API_KEY + '&external_source=imdb_id';
-        var response = await fetch(url, {
-            headers: { 'User-Agent': HEADERS['User-Agent'], 'Accept': 'application/json' }
-        });
-        if (!response.ok) return null;
-        var data = await response.json();
-        if (mediaType === 'movie') {
-            if (data.movie_results && data.movie_results.length > 0) return data.movie_results[0].id;
-        } else {
-            if (data.tv_results && data.tv_results.length > 0) return data.tv_results[0].id;
-        }
-        return null;
-    } catch (err) {
-        return null;
-    }
-}
-
-async function getTMDBTitle(tmdbId, mediaType) {
-    var cacheKey = tmdbId + '_' + mediaType;
-    if (CACHE[cacheKey]) return CACHE[cacheKey];
-    
-    var endpoint = mediaType === 'tv' ? 'tv' : 'movie';
-    var url = TMDB_BASE_URL + '/' + endpoint + '/' + tmdbId + '?api_key=' + TMDB_API_KEY + '&language=pt-BR';
-    
-    try {
-        var response = await fetch(url);
-        var data = await response.json();
-        var title = mediaType === 'tv' ? data.name : data.title;
-        var originalTitle = mediaType === 'tv' ? data.original_name : data.original_title;
-        var altTitles = [];
-        
-        try {
-            var altRes = await fetch(TMDB_BASE_URL + '/' + endpoint + '/' + tmdbId + '/alternative_titles?api_key=' + TMDB_API_KEY);
-            var altData = await altRes.json();
-            var results = altData.results || altData.titles || [];
-            for (var i = 0; i < results.length; i++) {
-                var r = results[i];
-                if (!r || !r.title) continue;
-                var c = (r.iso_3166_1 || '').toUpperCase();
-                if (['JP', 'US', 'GB', 'BR', 'PT', 'KR', 'CN'].includes(c)) {
-                    altTitles.push(r.title);
-                }
-            }
-        } catch (e) { /* ignore */ }
-        
-        var ano = null;
-        if (mediaType === 'tv' && data.first_air_date) ano = data.first_air_date.substring(0, 4);
-        else if (mediaType === 'movie' && data.release_date) ano = data.release_date.substring(0, 4);
-        
-        var result = { title: title, originalTitle: originalTitle, altTitles: altTitles, year: ano };
-        CACHE[cacheKey] = result;
-        return result;
-    } catch (err) {
-        return null;
-    }
-}
-
-function generateSlugVariations(baseTitle, season, ano) {
-    var baseSlugWords = titleToSlug(baseTitle, true);
-    var baseSlugNumbers = titleToSlug(baseTitle, false);
-    var variations = [];
-    var seen = {};
-    
-    function add(slug, source) {
-        if (!seen[slug]) {
-            seen[slug] = true;
-            variations.push({ slug: slug, source: source });
-        }
-    }
-    
-    var slugBases = baseSlugWords === baseSlugNumbers ? [baseSlugWords] : [baseSlugWords, baseSlugNumbers];
-    
-    for (var b = 0; b < slugBases.length; b++) {
-        var baseSlug = slugBases[b];
-        var words = baseSlug.split('-');
-        add(baseSlug, 'base');
-        if (ano) add(baseSlug + '-' + ano, 'base+ano');
-        add(baseSlug + '-legendado', 'base+legendado');
-        add(baseSlug + '-dublado', 'base+dublado');
-        if (ano) {
-            add(baseSlug + '-' + ano + '-legendado', 'base+ano+legendado');
-            add(baseSlug + '-' + ano + '-dublado', 'base+ano+dublado');
-        }
-        if (season > 1) {
-            add(baseSlug + '-' + season, 'base+season');
-            if (ano) add(baseSlug + '-' + ano + '-' + season, 'base+ano+season');
-        }
-        if (words.length > 3) {
-            for (var i = 3; i < words.length; i++) {
-                var reduced = words.slice(0, i).join('-');
-                add(reduced, 'reduced-' + i);
-                if (ano) add(reduced + '-' + ano, 'reduced-' + i + '+ano');
-                if (season > 1) add(reduced + '-' + season, 'reduced-' + i + '+season');
-            }
-        }
-    }
-    return variations;
-}
-
-async function searchDoramogo(query) {
-    var slugQuery = slugify(query);
-    if (!slugQuery) return [];
-    var url = DORAMOGO_BASE + '/search/?q=' + encodeURIComponent(query);
-    var res = await fetchText(url);
-    if (!res || res.status !== 200 || res.text.length < 2000) return [];
-    
-    var results = [];
-    var seen = {};
-    var re = /href=["'](https?:\/\/www\.doramogo\.net\/series\/([a-z0-9-]+))\/?["']/gi;
-    var m;
-    while ((m = re.exec(res.text)) !== null) {
-        var full = m[1];
-        var slug = m[2];
-        if (!seen[slug]) {
-            seen[slug] = 1;
-            results.push({ url: full, slug: slug });
-        }
-    }
-    return results;
-}
+// --- EXTRAÇÃO PRINCIPAL ---
 
 async function getStreams(tmdbId, mediaType, season, episode) {
-    var targetSeason = mediaType === 'movie' ? 1 : season;
-    var targetEpisode = mediaType === 'movie' ? 1 : episode;
-    var epPadded = targetEpisode.toString().padStart(2, '0');
-    var seasonPadded = targetSeason.toString().padStart(2, '0');
-    var timestamp = Date.now();
-
-    var proxies = await fetchProxies();
-    if (!proxies) {
-        proxies = { primary: 'https://ondemand.netflxx.shop', fallback: 'https://forks-doramas.netflxx.shop' };
+    clearLogs();
+    
+    log(`Tipo: ${mediaType}`);
+    log(`ID TMDB: ${tmdbId}`);
+    
+    let airDate = null;
+    
+    if (mediaType === 'tv') {
+        log(`Temporada: ${season}, Episódio: ${episode}`);
+        
+        const epUrl = `${TMDB_BASE_URL}/tv/${tmdbId}/season/${season}/episode/${episode}?api_key=${TMDB_API_KEY}`;
+        const epRes = await (await fetch(epUrl)).json();
+        airDate = epRes.air_date;
+        
+        var tmdbUrl = `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
+    } else {
+        var tmdbUrl = `${TMDB_BASE_URL}/movie/${tmdbId}?api_key=${TMDB_API_KEY}&language=pt-BR`;
     }
-    var cdnList = [proxies.primary, proxies.fallback];
-
-    var finalId = tmdbId;
-    if (String(tmdbId).toLowerCase().startsWith('tt')) {
-        var convertedId = await convertImdbToTmdb(tmdbId, mediaType);
-        if (convertedId) finalId = convertedId;
-        else return [];
-    }
-
-    var info = await getTMDBTitle(finalId, mediaType);
-    if (!info) return [];
-
-    var expectedRoots = buildExpectedRoots(info);
-    var strongTokens = buildStrongTokens(info);
-
-    // PASSO 1: DIRECT GUESS
-    var directSlugsPT = generateSlugVariations(info.title, targetSeason, info.year);
-    var directSlugsOriginal = [];
-    if (info.originalTitle && info.originalTitle !== info.title) {
-        directSlugsOriginal = generateSlugVariations(info.originalTitle, targetSeason, info.year);
-    }
-    var allDirectSlugs = directSlugsPT.concat(directSlugsOriginal);
-
-    var directUrls = [];
-    var seenDirectUrls = {};
-    for (var d = 0; d < allDirectSlugs.length; d++) {
-        var slug = allDirectSlugs[d].slug;
-        var firstLetter = slug.charAt(0).toUpperCase() || 'T';
-        for (var c = 0; c < cdnList.length; c++) {
-            var cdn = cdnList[c];
-            var url;
+    
+    const tvRes = await (await fetch(tmdbUrl)).json();
+    const namePt = tvRes.name || tvRes.title;
+    const nameOrig = tvRes.original_name || tvRes.original_title;
+    const year = (tvRes.first_air_date || tvRes.release_date || "").substring(0, 4);
+    
+    log(`TMDB: ${namePt} (${year})`);
+    
+    // Buscar proxies
+    const proxies = await fetchProxies() || { primary: 'https://ondemand.netflxx.shop', fallback: 'https://forks-doramas.netflxx.shop' };
+    const cdnList = [proxies.primary, proxies.fallback];
+    
+    const epPadded = episode.toString().padStart(2, '0');
+    const seasonPadded = season.toString().padStart(2, '0');
+    const timestamp = Date.now();
+    
+    // ============================================
+    // PASSO 1: DIRECT GUESS (Doramogo)
+    // ============================================
+    log("Tentando Direct Guess no Doramogo...");
+    
+    const guessSlugs = generateSlugVariations(namePt, season, year);
+    log(`Geradas ${guessSlugs.length} variações de slug`);
+    
+    for (const slug of guessSlugs) {
+        const firstLetter = slug.charAt(0).toUpperCase();
+        for (const cdn of cdnList) {
+            let url;
             if (mediaType === 'movie') {
-                url = cdn + '/' + firstLetter + '/' + slug + '/stream/stream.m3u8?nocache=' + timestamp;
+                url = `${cdn}/${firstLetter}/${slug}/stream/stream.m3u8?nocache=${timestamp}`;
             } else {
-                url = cdn + '/' + firstLetter + '/' + slug + '/' + seasonPadded + '-temporada/' + epPadded + '/stream.m3u8?nocache=' + timestamp;
+                url = `${cdn}/${firstLetter}/${slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
             }
-            if (!seenDirectUrls[url]) {
-                seenDirectUrls[url] = 1;
-                directUrls.push({ url: url });
+            
+            console.log(`  Testando: ${slug}...`);
+            if (await testUrl(url)) {
+                const label = slug.includes('-dublado') ? "Dublado" : "Legendado";
+                log(`✓ DIRECT GUESS encontrado: ${slug} (${label})`);
+                return [{
+                    name: `Doramogo [${label}]`,
+                    title: `${namePt} (${label})`,
+                    url: url,
+                    quality: '1080p',
+                    headers: HEADERS
+                }];
             }
         }
     }
-
-    for (var du = 0; du < directUrls.length; du++) {
-        if (await testUrl(directUrls[du].url)) {
-            return [{
-                url: directUrls[du].url,
-                name: "Doramogo",
-                title: (mediaType === 'movie' ? info.title : info.title + ' S' + targetSeason + 'E' + targetEpisode),
-                quality: '1080p',
-                headers: HEADERS,
-                subtitles: [],
-                provider: "doramogo"
-            }];
+    
+    log("Direct Guess falhou, iniciando busca no Megacine...");
+    
+    // ============================================
+    // PASSO 2: Busca no Megacine com similaridade
+    // ============================================
+    
+    let aniTitles = [];
+    if (mediaType === 'tv' && tvRes.original_language === 'ja') {
+        aniTitles = await getAnilistTitles(nameOrig, airDate);
+    }
+    
+    let finalTargets = [];
+    if (aniTitles.length > 0) {
+        finalTargets = aniTitles;
+    } else {
+        finalTargets = [namePt];
+    }
+    
+    // Normalizar alvos para comparação
+    const normalizedTargets = finalTargets.map(t => normalizeForComparison(t));
+    log(`Alvos de Similitude (normalizados): ${normalizedTargets.join(', ')}`);
+    
+    // Buscar no Megacine
+    const searchUrl = `${MEGACINE_BASE}/search/?q=${encodeURIComponent(namePt)}`;
+    const html = await (await fetch(searchUrl, { headers: HEADERS })).text();
+    
+    // Regex para encontrar resultados
+    const regex = /href="https:\/\/www\.megacine\.online\/(series|filmes)\/([^"]+)".*?card-title">([^<]+)<\/h3>/gs;
+    
+    let match;
+    const candidates = [];
+    
+    while ((match = regex.exec(html)) !== null) {
+        const [_, siteType, slug, display] = match;
+        
+        // Primeiro, remover dublado/legendado do slug para comparação
+        let slugForComparison = slug.replace(/-(dublado|legendado)$/, '');
+        slugForComparison = slugForComparison.replace(/-\d{4}$/, ''); // Remove ano
+        slugForComparison = slugForComparison.replace(/-/g, ' ');
+        
+        // Normalizar slug e display
+        const normSlug = normalizeForComparison(slugForComparison);
+        const normDisplay = normalizeForComparison(display);
+        
+        // Calcular melhor similaridade
+        let bestSim = 0;
+        for (const target of normalizedTargets) {
+            const simSlug = levenshteinRatio(normSlug, target);
+            const simDisplay = levenshteinRatio(normDisplay, target);
+            const sim = Math.max(simSlug, simDisplay);
+            if (sim > bestSim) bestSim = sim;
+        }
+        
+        console.log(`  DEBUG: "${slug}" -> similaridade: ${(bestSim * 100).toFixed(2)}%`);
+        
+        // Aceitar com 95%+
+        if (bestSim >= 0.95) {
+            candidates.push({
+                slug: slug,
+                display: display,
+                similarity: bestSim
+            });
+            log(`✓ Candidato aceito: ${slug} (${(bestSim * 100).toFixed(2)}%)`);
         }
     }
-
-    // PASSO 2: SEARCH
-    var queries = [];
-    var src = [info.title, info.originalTitle].concat(info.altTitles || []);
-    for (var qi = 0; qi < src.length; qi++) {
-        var t = (src[qi] || '').trim();
-        if (t && queries.indexOf(t) === -1) queries.push(t);
+    
+    if (candidates.length === 0) {
+        log("❌ Nenhum candidato com 95%+ de similaridade");
+        return [];
     }
-
-    var searchResults = [];
-    var seenSearchSlugs = {};
-    for (var q = 0; q < queries.length && searchResults.length < 10; q++) {
-        var results = await searchDoramogo(queries[q]);
-        for (var r = 0; r < results.length; r++) {
-            if (seenSearchSlugs[results[r].slug]) continue;
-            if (!isStrictMatch(results[r].slug, expectedRoots, strongTokens)) continue;
-            seenSearchSlugs[results[r].slug] = 1;
-            searchResults.push(results[r]);
-        }
-    }
-
-    if (searchResults.length === 0) return [];
-
-    for (var s = 0; s < searchResults.length; s++) {
-        searchResults[s]._score = scoreResult(searchResults[s].slug, info, expectedRoots, strongTokens, s);
-    }
-    searchResults.sort(function(a, b) { return b._score - a._score; });
-
-    var searchUrls = [];
-    var seenSearchUrls = {};
-    var maxResultsToTry = Math.min(searchResults.length, 4);
-    for (var sr = 0; sr < maxResultsToTry; sr++) {
-        var slug = searchResults[sr].slug;
-        var firstLetter = slug.charAt(0).toUpperCase() || 'T';
-        for (var c2 = 0; c2 < cdnList.length; c2++) {
-            var cdn2 = cdnList[c2];
-            var url2;
+    
+    // ============================================
+    // PASSO 3: Testar URLs dos candidatos
+    // ============================================
+    log("Testando URLs dos candidatos...");
+    
+    const validStreams = [];
+    
+    for (const cand of candidates) {
+        const firstLetter = cand.slug.charAt(0).toUpperCase();
+        
+        for (const cdn of cdnList) {
+            let url;
             if (mediaType === 'movie') {
-                url2 = cdn2 + '/' + firstLetter + '/' + slug + '/stream/stream.m3u8?nocache=' + timestamp;
+                url = `${cdn}/${firstLetter}/${cand.slug}/stream/stream.m3u8?nocache=${timestamp}`;
             } else {
-                url2 = cdn2 + '/' + firstLetter + '/' + slug + '/' + seasonPadded + '-temporada/' + epPadded + '/stream.m3u8?nocache=' + timestamp;
+                url = `${cdn}/${firstLetter}/${cand.slug}/${seasonPadded}-temporada/${epPadded}/stream.m3u8?nocache=${timestamp}`;
             }
-            if (!seenSearchUrls[url2]) {
-                seenSearchUrls[url2] = 1;
-                searchUrls.push({ url: url2 });
+            
+            console.log(`  Testando: ${cand.slug} no ${cdn}...`);
+            
+            if (await testUrl(url)) {
+                const isDubbed = cand.slug.includes('-dublado');
+                const isSubbed = cand.slug.includes('-legendado');
+                let label = "";
+                if (isDubbed) label = "Dublado";
+                else if (isSubbed) label = "Legendado";
+                
+                validStreams.push({
+                    name: `Megacine [${label || "Stream"}]`,
+                    title: `${cand.display}${label ? ` (${label})` : ''}`,
+                    url: url,
+                    quality: '1080p',
+                    headers: HEADERS,
+                    tested: true,
+                    working: true
+                });
+                
+                log(`✓ URL válida encontrada: ${cand.slug} (${label || "sem especificação"})`);
             }
         }
     }
-
-    var seenStreamUrl = {};
-    for (var su = 0; su < searchUrls.length; su++) {
-        if (seenStreamUrl[searchUrls[su].url]) continue;
-        seenStreamUrl[searchUrls[su].url] = 1;
-        if (await testUrl(searchUrls[su].url)) {
-            return [{
-                url: searchUrls[su].url,
-                name: "Doramogo",
-                title: (mediaType === 'movie' ? info.title : info.title + ' S' + targetSeason + 'E' + targetEpisode),
-                quality: '1080p',
-                headers: HEADERS,
-                subtitles: [],
-                provider: "doramogo"
-            }];
+    
+    if (validStreams.length === 0) {
+        log("❌ Nenhuma URL válida encontrada");
+        return [];
+    }
+    
+    // ============================================
+    // PASSO 4: Agrupar por slug base e aplicar lógica de dublado/legendado
+    // ============================================
+    const slugMap = new Map();
+    
+    for (const stream of validStreams) {
+        // Extrair o slug da URL
+        const urlParts = stream.url.split('/');
+        const slugIndex = urlParts.findIndex(part => part === 'S' || part === 'T') + 1;
+        const slug = urlParts[slugIndex];
+        
+        const baseSlug = slug.replace(/-(dublado|legendado)$/, '');
+        const type = slug.includes('-dublado') ? 'dublado' : 
+                     (slug.includes('-legendado') ? 'legendado' : 'indefinido');
+        
+        if (!slugMap.has(baseSlug)) {
+            slugMap.set(baseSlug, {
+                baseSlug: baseSlug,
+                variants: {},
+                display: stream.title
+            });
+        }
+        
+        slugMap.get(baseSlug).variants[type] = stream;
+    }
+    
+    // Construir streams finais
+    const finalStreams = [];
+    
+    for (const [baseSlug, data] of slugMap) {
+        const variants = data.variants;
+        
+        // Caso 1: Tem dublado E legendado
+        if (variants.dublado && variants.legendado) {
+            log(`✓ Adicionando DUBLADO e LEGENDADO para: ${baseSlug}`);
+            finalStreams.push(variants.dublado, variants.legendado);
+        }
+        // Caso 2: Só dublado
+        else if (variants.dublado && !variants.legendado) {
+            log(`✓ Adicionando apenas DUBLADO para: ${baseSlug}`);
+            finalStreams.push(variants.dublado);
+        }
+        // Caso 3: Só legendado
+        else if (variants.legendado && !variants.dublado) {
+            log(`✓ Adicionando apenas LEGENDADO para: ${baseSlug}`);
+            finalStreams.push(variants.legendado);
+        }
+        // Caso 4: Indefinido
+        else if (variants.indefinido) {
+            log(`✓ Adicionando versão SEM ESPECIFICAÇÃO para: ${baseSlug}`);
+            finalStreams.push(variants.indefinido);
         }
     }
-
-    return [];
+    
+    log(`✅ Total de streams gerados: ${finalStreams.length}`);
+    
+    // Mostrar resumo dos streams
+    finalStreams.forEach((s, i) => {
+        console.log(`  ${i+1}. ${s.name} - ${s.title}`);
+        console.log(`     URL: ${s.url.substring(0, 100)}...`);
+    });
+    
+    return finalStreams;
 }
 
 module.exports = { getStreams };
