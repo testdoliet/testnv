@@ -36,44 +36,19 @@ function clearLogs() {
     debugLogs = [];
 }
 
-// FUNÇÃO PARA MOSTRAR STREAMS IGUAL AO RETORNO FINAL
-function debugStream(stream, stage) {
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`📺 STREAM (${stage})`);
-    console.log(`${'='.repeat(80)}`);
-    console.log(`{
-  name: "${stream.name}",
-  title: "${stream.title}",
-  url: "${stream.url}",
-  quality: "${stream.quality}",
-  headers: {
-    "User-Agent": "${stream.headers?.['User-Agent'] || HEADERS['User-Agent']}",
-    "Referer": "${stream.headers?.['Referer'] || HEADERS['Referer']}"
-  }
-}`);
-    console.log(`${'='.repeat(80)}\n`);
-}
-
-function debugStreamsArray(streams, stage) {
+// FUNÇÃO PARA MOSTRAR STREAMS NO FORMATO SIMPLES (IGUAL O EXEMPLO)
+function showStreams(streams) {
     if (!streams || streams.length === 0) {
-        console.log(`\n❌ NENHUM STREAM (${stage})\n`);
+        console.log(`\n❌ NENHUM STREAM ENCONTRADO\n`);
         return;
     }
     
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`📦 ${streams.length} STREAM(S) (${stage})`);
-    console.log(`${'='.repeat(80)}`);
-    
+    console.log(`\n📺 STREAMS ENCONTRADOS:`);
     streams.forEach((stream, i) => {
-        console.log(`\n[${i + 1}]`);
-        console.log(`  name: "${stream.name}"`);
-        console.log(`  title: "${stream.title}"`);
-        console.log(`  url: "${stream.url}"`);
-        console.log(`  quality: "${stream.quality}"`);
-        console.log(`  headers: { "User-Agent": "${stream.headers?.['User-Agent'] || HEADERS['User-Agent']}", "Referer": "${stream.headers?.['Referer'] || HEADERS['Referer']}" }`);
+        console.log(`[${i + 1}] ${stream.name} | ${stream.title}`);
+        console.log(`    ${stream.url}`);
     });
-    
-    console.log(`\n${'='.repeat(80)}\n`);
+    console.log(``);
 }
 
 function normalizeForComparison(text) {
@@ -260,6 +235,9 @@ async function fetchProxies() {
 async function getStreams(tmdbId, mediaType, season, episode) {
     clearLogs();
     
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🎬 INICIANDO BUSCA`);
+    console.log(`${'='.repeat(60)}`);
     log(`Tipo: ${mediaType}`);
     log(`ID TMDB: ${tmdbId}`);
     
@@ -318,9 +296,8 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                     headers: HEADERS
                 };
                 
-                // DEBUG DO STREAM IGUAL AO RETORNO FINAL
-                debugStream(stream, "DIRECT GUESS - RETORNANDO");
-                
+                console.log(`\n✅ DIRECT GUESS ENCONTRADO!`);
+                showStreams([stream]);
                 return [stream];
             }
         }
@@ -420,9 +397,6 @@ async function getStreams(tmdbId, mediaType, season, episode) {
                 
                 validStreams.push(stream);
                 log(`✓ URL válida: ${cand.slug}`);
-                
-                // DEBUG DO STREAM INDIVIDUAL
-                debugStream(stream, `CANDIDATO VÁLIDO - ${cand.slug}`);
             }
         }
     }
@@ -432,11 +406,12 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         return [];
     }
     
-    // DEBUG DE TODOS OS STREAMS VÁLIDOS ANTES DO AGRUPAMENTO
-    debugStreamsArray(validStreams, "STREAMS VÁLIDOS (ANTES DO AGRUPAMENTO)");
+    // MOSTRAR STREAMS VÁLIDOS ENCONTRADOS
+    console.log(`\n📊 STREAMS VÁLIDOS ENCONTRADOS:`);
+    showStreams(validStreams);
     
     // ============================================
-    // PASSO 4: Agrupar e aplicar lógica
+    // PASSO 4: Agrupar e aplicar lógica de dublado/legendado
     // ============================================
     const slugMap = new Map();
     
@@ -480,8 +455,11 @@ async function getStreams(tmdbId, mediaType, season, episode) {
         }
     }
     
-    // DEBUG FINAL DOS STREAMS IGUAL AO RETORNO
-    debugStreamsArray(finalStreams, "🎉 RESULTADO FINAL - STREAMS RETORNADOS");
+    // MOSTRAR STREAMS FINAIS (IGUAL O EXEMPLO)
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`🎉 RESULTADO FINAL - STREAMS RETORNADOS`);
+    console.log(`${'='.repeat(60)}`);
+    showStreams(finalStreams);
     
     log(`✅ Total de streams gerados: ${finalStreams.length}`);
     
